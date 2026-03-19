@@ -30,3 +30,9 @@ httpx==0.28.1                       # Planka REST calls in notify.py + api/serve
 # ------------------------------------------------------------------------------
 typer[all]==0.24.1                  # [all] adds rich + shellingham
 python-dotenv==1.2.2
+
+# ------------------------------------------------------------------------------
+# MLflow — experiment tracking (optional; used by sample plugin + any plugin
+#          that calls _try_mlflow_log when MLFLOW_TRACKING_URI is set)
+# ------------------------------------------------------------------------------
+mlflow==2.20.2

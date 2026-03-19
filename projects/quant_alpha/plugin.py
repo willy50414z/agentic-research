@@ -113,6 +113,8 @@ class QuantAlphaPlugin(ResearchPlugin):
 
         if decision.get("action") == "replan" and decision.get("notes"):
             goal = f"{goal}  [REVISED: {decision['notes']}]"
+            if len(goal) > 500:
+                goal = goal[:497] + "..."
 
         prompt = _load_prompt("plan").format(
             goal=goal,

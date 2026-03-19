@@ -56,7 +56,6 @@ class ResearchState(TypedDict):
 # ---------------------------------------------------------------------------
 
 def _analyze_router(state: ResearchState) -> str:
-    # TODO(phase4): record FAIL loop metrics — currently only PASS loops write to loop_metrics
     result = state.get("last_result", "UNKNOWN")
     if result == "PASS":
         return "pass"
@@ -89,11 +88,9 @@ def _make_loop_counter_router(review_interval: int):
 
 def _make_record_metrics_node(db_url: str):
     """
-    Returns a framework node that writes one row to loop_metrics after every PASS.
-    Inserted between summarize and the loop-counter router — plugins never call this.
-
-    Note: summarize_node increments loop_index before returning, so the completed
-    loop index is loop_index - 1 at the time this node runs.
+    Framework node: writes loop_metrics after every PASS.
+    Runs after summarize_node, which already incremented loop_index,
+    so completed loop = loop_index - 1.
     """
     from .db.queries import record_loop_metrics
 
@@ -118,6 +115,34 @@ def _make_record_metrics_node(db_url: str):
         return {}
 
     return record_metrics_node
+
+
+def _make_record_terminate_metrics_node(db_url: str):
+    """
+    Framework node: writes loop_metrics when a loop terminates without PASS.
+    Runs on the TERMINATE path from analyze (before END), preserving the
+    current loop_index (summarize never ran, so it was not incremented).
+    """
+    from .db.queries import record_loop_metrics
+
+    def record_terminate_metrics_node(state: dict) -> dict:
+        loop = state.get("loop_index", 0)
+        try:
+            record_loop_metrics(
+                project_id=state.get("project_id", ""),
+                loop_index=loop,
+                result=state.get("last_result", "TERMINATE"),
+                reason=state.get("last_reason", ""),
+                report_path=None,
+                metrics=state.get("test_metrics", {}),
+                db_url=db_url,
+            )
+            logger.info("terminate_metrics recorded: project=%s loop=%d", state.get("project_id"), loop)
+        except Exception as e:
+            logger.warning("terminate_metrics write failed (non-blocking): %s", e)
+        return {}
+
+    return record_terminate_metrics_node
 
 
 def build_graph(plugin: ResearchPlugin, config: dict):
@@ -150,7 +175,8 @@ def build_graph(plugin: ResearchPlugin, config: dict):
     workflow.add_node("analyze", plugin.analyze_node)
     workflow.add_node("revise", plugin.revise_node)
     workflow.add_node("summarize", plugin.summarize_node)
-    workflow.add_node("record_metrics", _make_record_metrics_node(db_url))  # framework node
+    workflow.add_node("record_metrics", _make_record_metrics_node(db_url))
+    workflow.add_node("record_terminate_metrics", _make_record_terminate_metrics_node(db_url))
     workflow.add_node("notify_planka", notify_planka_node)
 
     # --- Edges ---
@@ -162,9 +188,10 @@ def build_graph(plugin: ResearchPlugin, config: dict):
     workflow.add_conditional_edges(
         "analyze",
         _analyze_router,
-        {"fail": "revise", "pass": "summarize", "terminate": END},
+        {"fail": "revise", "pass": "summarize", "terminate": "record_terminate_metrics"},
     )
 
+    workflow.add_edge("record_terminate_metrics", END)
     workflow.add_edge("revise", "implement")
     workflow.add_edge("summarize", "record_metrics")
 

@@ -10,10 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Register plugins (import triggers @register decorator)
-import projects.dummy.plugin       # noqa: F401
-import projects.demo.plugin        # noqa: F401
-import projects.quant_alpha.plugin # noqa: F401
+# Auto-discover and register all plugins under projects/*/plugin.py
+from framework.plugin_registry import discover_plugins as _discover_plugins
+_discover_plugins()
 
 from framework.api.server import app  # noqa: F401 — re-exported for uvicorn
 

@@ -18,8 +18,15 @@ Usage:
 """
 
 from __future__ import annotations
+import importlib
+import logging
+import sys
+from pathlib import Path
 from typing import Type
+
 from .plugin_interface import ResearchPlugin
+
+logger = logging.getLogger(__name__)
 
 _registry: dict[str, Type[ResearchPlugin]] = {}
 
@@ -45,3 +52,35 @@ def resolve(name: str) -> ResearchPlugin:
 def list_plugins() -> list[str]:
     """Return all registered plugin names."""
     return list(_registry.keys())
+
+
+def discover_plugins(base_dir: str | None = None) -> list[str]:
+    """
+    Scan projects/*/plugin.py and import each module to trigger @register.
+
+    Replaces manual 'import projects.xxx.plugin' lines in cli/main.py and main.py.
+    Idempotent — already-imported modules are skipped.
+
+    Returns a list of module names that were newly imported.
+    """
+    root = Path(base_dir or Path(__file__).parent.parent)
+    projects_dir = root / "projects"
+    if not projects_dir.is_dir():
+        logger.warning("discover_plugins: 'projects/' directory not found at %s", root)
+        return []
+
+    discovered = []
+    for plugin_file in sorted(projects_dir.glob("*/plugin.py")):
+        module_name = f"projects.{plugin_file.parent.name}.plugin"
+        if module_name in sys.modules:
+            continue
+        try:
+            importlib.import_module(module_name)
+            discovered.append(module_name)
+            logger.debug("discover_plugins: loaded %s", module_name)
+        except Exception as e:
+            logger.warning("discover_plugins: failed to load %s — %s", module_name, e)
+
+    if discovered:
+        logger.info("discover_plugins: loaded %d plugin(s): %s", len(discovered), discovered)
+    return discovered

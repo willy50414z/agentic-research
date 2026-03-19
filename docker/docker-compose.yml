@@ -1,4 +1,23 @@
 services:
+  # ---------------------------------------------------------------------------
+  # MLflow — 實驗追蹤 UI（可選）
+  # 設定 MLFLOW_TRACKING_URI=http://mlflow:5000 讓 plugin 自動記錄指標
+  # ---------------------------------------------------------------------------
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.20.2
+    container_name: agentic-mlflow
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ${VOLUME_BASE_DIR}/mlflow:/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri /mlflow/db
+      --default-artifact-root /mlflow/artifacts
+
   planka:
     image: ghcr.io/plankanban/planka:latest
     container_name: planka

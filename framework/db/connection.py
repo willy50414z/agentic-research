@@ -1,42 +1,60 @@
 """
 framework/db/connection.py
 
-psycopg3 connection helper for the business schema tables.
-(LangGraph's checkpointer manages its own connection separately.)
+psycopg3 connection pool for the business schema tables.
+Uses psycopg_pool.ConnectionPool (min=1, max=5) — safe for multi-process deployments.
+(LangGraph's checkpointer manages its own dedicated connection separately.)
 """
 
 import os
 import logging
+from contextlib import contextmanager
+
 import psycopg
+from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
-_conn: psycopg.Connection | None = None
+_pool: ConnectionPool | None = None
 
 
-def get_connection(db_url: str | None = None) -> psycopg.Connection:
+def _get_pool(db_url: str) -> ConnectionPool:
+    """Return (and lazily create) the module-level connection pool."""
+    global _pool
+    if _pool is None:
+        logger.info("Initialising connection pool for business schema (min=1, max=5).")
+        _pool = ConnectionPool(
+            conninfo=db_url,
+            min_size=1,
+            max_size=5,
+            open=True,
+            kwargs={"autocommit": True},
+        )
+    return _pool
+
+
+@contextmanager
+def get_connection(db_url: str | None = None):
     """
-    Return (and lazily create) a module-level psycopg3 connection.
-    Thread-safe for single-process use; for multi-process use a pool.
+    Context manager that borrows a connection from the pool and returns it on exit.
+
+    Usage:
+        with get_connection(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(...)
     """
-    # TODO(phase4): migrate to AsyncConnectionPool (psycopg3) for multi-process safety
-    global _conn
     url = db_url or os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set.")
-
-    if _conn is None or _conn.closed:
-        logger.info("Opening database connection to business schema.")
-        _conn = psycopg.connect(url, autocommit=True)
-
-    return _conn
+    with _get_pool(url).connection() as conn:
+        yield conn
 
 
 def run_migration(sql_path: str, db_url: str | None = None) -> None:
     """Execute a SQL migration file against the database."""
-    conn = get_connection(db_url)
-    with open(sql_path, "r") as f:
-        sql = f.read()
-    with conn.cursor() as cur:
-        cur.execute(sql)
+    with get_connection(db_url) as conn:
+        with open(sql_path, "r") as f:
+            sql = f.read()
+        with conn.cursor() as cur:
+            cur.execute(sql)
     logger.info("Migration applied: %s", sql_path)

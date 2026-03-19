@@ -28,27 +28,27 @@ def create_project(
     config: dict | None = None,
     db_url: str | None = None,
 ) -> None:
-    conn = get_connection(db_url)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO projects (id, name, plugin_name, goal, config)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (project_id, name, plugin_name, goal, json.dumps(config or {})),
-        )
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO projects (id, name, plugin_name, goal, config)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (project_id, name, plugin_name, goal, json.dumps(config or {})),
+            )
     logger.info("Project '%s' upserted.", project_id)
 
 
 def get_project(project_id: str, db_url: str | None = None) -> dict | None:
-    conn = get_connection(db_url)
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, name, plugin_name, goal, config, created_at FROM projects WHERE id = %s",
-            (project_id,),
-        )
-        row = cur.fetchone()
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, plugin_name, goal, config, created_at FROM projects WHERE id = %s",
+                (project_id,),
+            )
+            row = cur.fetchone()
     if row is None:
         return None
     return {
@@ -76,44 +76,44 @@ def record_loop_metrics(
     metrics: optional dict with domain-specific keys like win_rate, alpha_ratio, etc.
     """
     m = metrics or {}
-    conn = get_connection(db_url)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO loop_metrics
-                (project_id, loop_index, win_rate, alpha_ratio, max_drawdown,
-                 is_profit_factor, oos_profit_factor, result, reason, report_minio_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (project_id, loop_index) DO UPDATE SET
-                result = EXCLUDED.result,
-                reason = EXCLUDED.reason,
-                report_minio_key = EXCLUDED.report_minio_key,
-                recorded_at = NOW()
-            """,
-            (
-                project_id, loop_index,
-                m.get("win_rate"), m.get("alpha_ratio"), m.get("max_drawdown"),
-                m.get("is_profit_factor"), m.get("oos_profit_factor"),
-                result, reason, report_path,
-            ),
-        )
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO loop_metrics
+                    (project_id, loop_index, win_rate, alpha_ratio, max_drawdown,
+                     is_profit_factor, oos_profit_factor, result, reason, report_minio_key)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (project_id, loop_index) DO UPDATE SET
+                    result = EXCLUDED.result,
+                    reason = EXCLUDED.reason,
+                    report_minio_key = EXCLUDED.report_minio_key,
+                    recorded_at = NOW()
+                """,
+                (
+                    project_id, loop_index,
+                    m.get("win_rate"), m.get("alpha_ratio"), m.get("max_drawdown"),
+                    m.get("is_profit_factor"), m.get("oos_profit_factor"),
+                    result, reason, report_path,
+                ),
+            )
     logger.info("loop_metrics recorded: project=%s loop=%d result=%s", project_id, loop_index, result)
 
 
 def get_loop_metrics(project_id: str, db_url: str | None = None) -> list[dict]:
-    conn = get_connection(db_url)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT loop_index, win_rate, alpha_ratio, max_drawdown,
-                   is_profit_factor, oos_profit_factor, result, reason, report_minio_key, recorded_at
-            FROM loop_metrics
-            WHERE project_id = %s
-            ORDER BY loop_index
-            """,
-            (project_id,),
-        )
-        rows = cur.fetchall()
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT loop_index, win_rate, alpha_ratio, max_drawdown,
+                       is_profit_factor, oos_profit_factor, result, reason, report_minio_key, recorded_at
+                FROM loop_metrics
+                WHERE project_id = %s
+                ORDER BY loop_index
+                """,
+                (project_id,),
+            )
+            rows = cur.fetchall()
     return [
         {
             "loop_index": r[0], "win_rate": r[1], "alpha_ratio": r[2],
@@ -136,15 +136,15 @@ def record_checkpoint_decision(
     modified_plan: dict | None = None,
     db_url: str | None = None,
 ) -> None:
-    conn = get_connection(db_url)
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO checkpoint_decisions (project_id, loop_index, action, notes, modified_plan)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (project_id, loop_index, action, notes, json.dumps(modified_plan) if modified_plan else None),
-        )
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO checkpoint_decisions (project_id, loop_index, action, notes, modified_plan)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (project_id, loop_index, action, notes, json.dumps(modified_plan) if modified_plan else None),
+            )
     logger.info(
         "checkpoint_decision recorded: project=%s loop=%d action=%s",
         project_id, loop_index, action,

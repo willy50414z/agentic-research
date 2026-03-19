@@ -34,11 +34,9 @@ from dotenv import load_dotenv
 # Load .env from the app root (works whether running inside or outside Docker)
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
-# Register all plugins before resolving
-# TODO(phase3): replace with importlib auto-discovery (scan projects/*/plugin.py)
-import projects.dummy.plugin       # noqa: F401  — triggers @register
-import projects.demo.plugin        # noqa: F401  — triggers @register
-import projects.quant_alpha.plugin # noqa: F401  — triggers @register
+# Auto-discover and register all plugins under projects/*/plugin.py
+from framework.plugin_registry import discover_plugins as _discover_plugins
+_discover_plugins()
 
 from framework.db.queries import create_project, get_project, get_loop_metrics, record_checkpoint_decision
 from framework.graph import get_or_build_graph

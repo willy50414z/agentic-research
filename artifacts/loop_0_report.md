@@ -1,7 +1,7 @@
 # Loop 0 Research Report
 
 **Strategy** : rsi_momentum
-**Goal**     : find alpha in RSI momentum strategies
+**Goal**     : phase4 full test
 
 ## Results
 
