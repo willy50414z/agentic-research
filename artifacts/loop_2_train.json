@@ -1,0 +1,18 @@
+{
+  "loop": 2,
+  "plan": {
+    "strategy_type": "rsi_momentum",
+    "lookback": 5,
+    "entry_threshold": 0.15,
+    "exit_threshold": 0.7,
+    "stop_loss_pct": 0.08,
+    "target_win_rate": 0.55
+  },
+  "train_result": {
+    "win_rate": 0.6429,
+    "alpha_ratio": 2.4635,
+    "max_drawdown": 0.1815,
+    "n_trades": 14,
+    "total_return": -0.0119
+  }
+}

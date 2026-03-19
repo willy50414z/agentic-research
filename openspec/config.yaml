@@ -1,0 +1,47 @@
+schema: spec-driven
+
+context: |
+  Project: Agentic Research Workflow Engine
+  Purpose: A domain-agnostic framework for running LLM-driven research loops with human-in-the-loop controls.
+           Business logic lives entirely in plugins (projects/<name>/plugin.py).
+           This repo does NOT contain any business domain code (no quant trading, NLP tasks, etc.).
+
+  Tech stack:
+    - Python 3.11+
+    - LangGraph (StateGraph, PostgresSaver checkpointer, interrupt/Command)
+    - PostgreSQL 16 (psycopg3, autocommit=True, single module-level connection)
+    - FastAPI + Pydantic (API server, ~80 lines)
+    - Typer (CLI)
+    - Docker Compose (PostgreSQL + LangGraph app + optional Planka)
+
+  Key architectural patterns:
+    - Plugin ABC: ResearchPlugin in framework/plugin_interface.py — all domain logic goes here
+    - Plugin registry: @register decorator + resolve(name) in framework/plugin_registry.py
+    - HITL: interrupt() called inside node bodies (not interrupt_before), conditional on state
+    - State: single TypedDict (ResearchState) shared across all nodes
+    - Persistence: PostgresSaver for graph state; 3 business tables for metrics/audit
+    - Artifact storage: local ./artifacts/ directory (MinIO optional, Phase 4)
+
+  Completed phases:
+    - Phase 0: Infrastructure (docker-compose, PostgreSQL schema, plugin ABC)
+    - Phase 1: Core graph + CLI (graph.py, tag_parser.py, DummyPlugin, CLI start/status/plugins)
+    - Phase 2: HITL (interrupt() mechanism, /resume + /planka-webhook API, CLI approve)
+    - Phase 2.5: Business schema (record_metrics framework node, checkpoint_decisions audit trail)
+
+  Next phases:
+    - Phase 3: First real plugin (projects/quant_alpha/ or similar)
+    - Phase 4: Optional enhancements (Planka, MinIO, Langfuse/MLflow, connection pool)
+
+  Conventions:
+    - Node functions: (state: dict) -> dict (partial state update, never full state replacement)
+    - Routing signals: last_result = "PASS" | "FAIL" | "TERMINATE" | "UNKNOWN"
+    - LLM output parsing: stdout XML-like tags <RESULT>, <PLAN> via framework/tag_parser.py
+    - framework/ has zero business logic — never add domain-specific code there
+    - Plugin name: snake_case, unique, set as class attribute name = "..." on ResearchPlugin subclass
+
+  Known technical debt:
+    - Single DB connection (module-level psycopg.connect) — fine for single-process
+    - In-process graph cache (get_or_build_graph) — rebuilt on restart, state in PostgreSQL
+    - FAIL loops not written to loop_metrics (only PASS loops are recorded)
+    - loop_goal accumulates replan notes in plan_node (bounded by human replan frequency)
+    - Plugins must be manually imported in cli/main.py (no auto-discovery yet)

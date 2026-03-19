@@ -1,0 +1,47 @@
+services:
+  planka:
+    image: ghcr.io/plankanban/planka:latest
+    container_name: planka
+    restart: always
+    volumes:
+      - ${VOLUME_BASE_DIR}/user-avatars:/app/public/user-avatars
+      - ${VOLUME_BASE_DIR}/project-background-images:/app/public/project-background-images
+      - ${VOLUME_BASE_DIR}/attachments:/app/private/attachments
+    ports:
+      - "7002:1337"
+    env_file: ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-research-postgres
+    restart: always
+    volumes:
+      - ${VOLUME_BASE_DIR}/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    env_file: ../.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentic-research"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LangGraph 流程引擎服務
+  langgraph-engine:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: agentic-langgraph
+    restart: unless-stopped
+    ports:
+      - "7001:8000"
+    volumes:
+      # 掛載 repo 根目錄，git 版控正常，hot-reload 即時生效
+      - ..:/app
+    env_file: ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy

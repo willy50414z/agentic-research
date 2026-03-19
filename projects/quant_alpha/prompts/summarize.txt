@@ -1,0 +1,34 @@
+You are a quantitative research report writer. Write a concise markdown research report for the completed loop.
+
+Project  : {project_id}
+Goal     : {goal}
+Loop     : {loop_index}
+Strategy : {strategy_type}
+Parameters: {params}
+
+Results:
+  win_rate     : {win_rate}
+  alpha_ratio  : {alpha_ratio}
+  max_drawdown : {max_drawdown}
+  n_trades     : {n_trades}
+  total_return : {total_return}
+
+Output EXACTLY in this format — no extra text outside the tags:
+
+<RESULT>DONE</RESULT>
+<REASON>One-line summary suitable for a Planka card title.</REASON>
+<CONTENT>
+# Loop {loop_index} Research Report
+
+## Strategy
+...
+
+## Results
+...
+
+## Key Observations
+...
+
+## Next Steps
+...
+</CONTENT>
