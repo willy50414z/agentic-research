@@ -18,7 +18,6 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 不需要 COPY . . — docker-compose 以 .:/app volume 掛載整個 repo
-# 若需要無 volume 的 production image，在此加上 COPY . .
+COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

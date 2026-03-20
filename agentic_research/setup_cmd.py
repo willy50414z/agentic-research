@@ -4,26 +4,16 @@ agentic_research/setup_cmd.py
 `agentic-research setup` — one-time global infra setup per machine.
 
 Actions:
-  1. Create ~/.agentic-research/ directory structure
-  2. Copy docker-compose.yml for global stack (4 services)
-  3. Interactive LLM credential discovery (claude → codex → gemini → local)
-  4. Write ~/.agentic-research/.env
-  5. docker compose up -d
-  6. Create Planka board + columns
+  1. Copy docker-compose.yml for global stack (4 services) into CWD
+  2. Interactive LLM credential discovery (claude → codex → gemini → local)
+  3. Write .env into CWD
 """
 
 import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import typer
-
-_GLOBAL_DIR = Path.home() / ".agentic-research"
-_ENV_FILE = _GLOBAL_DIR / ".env"
-_COMPOSE_FILE = _GLOBAL_DIR / "docker-compose.yml"
-_DATA_DIR = _GLOBAL_DIR / "data"
 
 # Source compose file (bundled with the package)
 _PKG_DIR = Path(__file__).parent
@@ -33,22 +23,22 @@ _COMPOSE_TEMPLATE = _PKG_DIR / "templates" / "docker-compose.global.yml"
 def setup():
     """
     One-time global infrastructure setup.
-    Creates ~/.agentic-research/, starts 4 Docker services, configures LLM credentials.
+    Writes docker-compose.yml and .env into the current directory.
     """
+    out_dir = Path.cwd()
+    env_file = out_dir / ".env"
+    compose_file = out_dir / "docker-compose.yml"
+    data_dir = out_dir / "data"
+
     typer.echo("\n─── Agentic Research Setup ───────────────────────────────────")
+    typer.echo(f"Output directory: {out_dir}")
 
-    # 1. Create directory structure
-    _GLOBAL_DIR.mkdir(parents=True, exist_ok=True)
-    (_DATA_DIR / "postgres").mkdir(parents=True, exist_ok=True)
-    (_DATA_DIR / "mlflow").mkdir(parents=True, exist_ok=True)
-    typer.echo(f"✓ Created {_GLOBAL_DIR}")
-
-    # 2. Copy docker-compose.yml
+    # 1. Copy docker-compose.yml
     if _COMPOSE_TEMPLATE.exists():
-        shutil.copy(_COMPOSE_TEMPLATE, _COMPOSE_FILE)
+        shutil.copy(_COMPOSE_TEMPLATE, compose_file)
     else:
-        _write_default_compose(_COMPOSE_FILE)
-    typer.echo(f"✓ docker-compose.yml → {_COMPOSE_FILE}")
+        _write_default_compose(compose_file)
+    typer.echo(f"✓ docker-compose.yml → {compose_file}")
 
     # 3. Interactive LLM credential setup
     typer.echo("\n─── LLM Configuration ────────────────────────────────────────")
@@ -69,8 +59,8 @@ def setup():
         "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/agentic-research",
         "MLFLOW_TRACKING_URI": "http://localhost:5000",
         "FRAMEWORK_API_URL": "http://localhost:7001",
-        "AGENTIC_HOME": str(_GLOBAL_DIR),
-        "VOLUME_BASE_DIR": str(_DATA_DIR),
+        "AGENTIC_HOME": str(out_dir),
+        "VOLUME_BASE_DIR": str(data_dir),
         "FRAMEWORK_IMAGE": framework_image,
     }
     llm_chain: list[str] = []
@@ -79,7 +69,6 @@ def setup():
     typer.echo("[1] Claude")
     claude_cred = Path.home() / ".claude" / ".credentials.json"
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
-    print(claude_cred)
     if claude_cred.exists():
         typer.echo(f"    ✓ Found: {claude_cred}")
         use = typer.confirm("    Use as primary?", default=True)
@@ -168,25 +157,18 @@ def setup():
     typer.echo("─────────────────────────────────────────────────────────────")
 
     # 4. Write .env
-    _write_env(_ENV_FILE, env_vars)
-    typer.echo(f"\n✓ Written: {_ENV_FILE}")
+    _write_env(env_file, env_vars)
+    typer.echo(f"\n✓ Written: {env_file}")
 
     # 5. Write teardown.sh
-    _write_teardown(_GLOBAL_DIR / "teardown.sh")
-
-    # 6. docker compose up -d
-    typer.echo("\nStarting Docker services...")
-    _compose_up()
-
-    # 7. Create Planka board + columns
-    typer.echo("Setting up Planka board...")
-    _setup_planka(env_vars)
+    _write_teardown(out_dir / "teardown.sh", compose_file)
 
     typer.echo("\n✓ Setup complete.")
-    typer.echo(f"  Config dir      : {_GLOBAL_DIR}")
-    typer.echo(f"  .env            : {_ENV_FILE}")
-    typer.echo(f"  Framework image : {framework_image}")
-    typer.echo("  Docker services : postgres | mlflow | planka | framework-api")
+    typer.echo(f"  docker-compose.yml : {compose_file}")
+    typer.echo(f"  .env               : {env_file}")
+    typer.echo(f"  Framework image    : {framework_image}")
+    typer.echo("\nTo start Docker services, run:")
+    typer.echo(f"  docker compose -f \"{compose_file}\" up -d")
     typer.echo("\nNext step: agentic-research init <project-name>")
 
 
@@ -227,114 +209,14 @@ def _write_env(path: Path, vars: dict) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_teardown(path: Path) -> None:
+def _write_teardown(path: Path, compose_file: Path) -> None:
     path.write_text(
         "#!/bin/bash\n"
         "# Stop all agentic-research services\n"
-        f'docker compose -f "{_COMPOSE_FILE}" down\n',
+        f'docker compose -f "{compose_file}" down\n',
         encoding="utf-8",
     )
     path.chmod(0o755)
-
-
-def _compose_up() -> None:
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(_COMPOSE_FILE), "up", "-d"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            typer.echo(f"[WARN] docker compose up returned non-zero: {result.stderr[:200]}")
-        else:
-            typer.echo("✓ Services started")
-    except FileNotFoundError:
-        typer.echo("[WARN] `docker` not found on PATH. Start services manually.")
-
-
-def _setup_planka(env_vars: dict) -> None:
-    """
-    Auto-create Planka project, board, and columns.
-    Required columns: Planning | Spec Pending Review | Verify | Review | Done | Failed
-    """
-    import time
-    import httpx
-
-    planka_url = "http://localhost:7002"
-    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@example.com")
-    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "adminpassword")
-
-    # Wait for Planka to be ready (up to 30 s)
-    for i in range(10):
-        try:
-            r = httpx.get(f"{planka_url}/api/config", timeout=3)
-            if r.status_code < 500:
-                break
-        except Exception:
-            pass
-        time.sleep(3)
-    else:
-        typer.echo("[WARN] Planka not reachable after 30 s — skipping board setup.")
-        typer.echo(f"       Start Planka at {planka_url} then re-run setup.")
-        return
-
-    try:
-        # 1. Login
-        r = httpx.post(
-            f"{planka_url}/api/access-tokens",
-            json={"emailOrUsername": admin_email, "password": admin_password},
-            timeout=10,
-        )
-        if r.status_code != 200:
-            typer.echo(f"[WARN] Planka login failed ({r.status_code}). Board not created.")
-            return
-        token = r.json()["item"]["token"]
-        h = {"Authorization": f"Bearer {token}"}
-
-        # 2. Create project "Agentic Research"
-        r = httpx.post(
-            f"{planka_url}/api/projects",
-            headers=h,
-            json={"name": "Agentic Research", "type": "shared", "position": 65535},
-            timeout=10,
-        )
-        project_id = r.json()["item"]["id"]
-
-        # 3. Create board "Research"
-        r = httpx.post(
-            f"{planka_url}/api/projects/{project_id}/boards",
-            headers=h,
-            json={"name": "Research", "position": 65535},
-            timeout=10,
-        )
-        board_id = r.json()["item"]["id"]
-
-        # 4. Create columns in order
-        columns = [
-            ("Planning",           10000),
-            ("Spec Pending Review", 20000),
-            ("Verify",             25000),
-            ("Review",             30000),
-            ("Done",               40000),
-            ("Failed",             50000),
-        ]
-        for name, position in columns:
-            httpx.post(
-                f"{planka_url}/api/boards/{board_id}/lists",
-                headers=h,
-                json={"name": name, "position": position, "type": "active"},
-                timeout=10,
-            )
-
-        env_vars["PLANKA_API_URL"] = planka_url
-        env_vars["PLANKA_TOKEN"] = token
-        env_vars["PLANKA_BOARD_ID"] = board_id
-
-        typer.echo(f"✓ Planka board created (id: {board_id})")
-        typer.echo(f"  Columns: Planning → Spec Pending Review → Verify → Review → Done/Failed")
-        typer.echo(f"  Open: {planka_url}")
-    except Exception as e:
-        typer.echo(f"[WARN] Could not auto-configure Planka: {e}")
-        typer.echo("       You can configure it manually via the Planka UI.")
 
 
 def _write_default_compose(path: Path) -> None:

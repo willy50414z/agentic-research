@@ -64,7 +64,7 @@ services:
     image: ${FRAMEWORK_IMAGE:-ghcr.io/your-username/agentic-research:latest}
     container_name: agentic-framework-api
     restart: unless-stopped
-    command: uvicorn framework.api.server:app --host 0.0.0.0 --port 8000
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agentic-research
       MLFLOW_TRACKING_URI: http://mlflow:5000

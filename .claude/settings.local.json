@@ -3,7 +3,10 @@
     "allow": [
       "Bash(find /e/Code/agentic-research -name *.py -o -name *.json -o -name *.toml)",
       "Bash(find /e/Code/agentic-research -type d ! -path ./.git/* ! -path ./.idea/*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)",
+      "Bash(docker rm:*)"
     ]
   }
 }
