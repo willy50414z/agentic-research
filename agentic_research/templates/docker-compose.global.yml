@@ -61,7 +61,7 @@ services:
       - agentic-research_default
 
   framework-api:
-    image: agentic-research:latest
+    image: ${FRAMEWORK_IMAGE:-ghcr.io/your-username/agentic-research:latest}
     container_name: agentic-framework-api
     restart: unless-stopped
     command: uvicorn framework.api.server:app --host 0.0.0.0 --port 8000

@@ -54,19 +54,32 @@ def setup():
     typer.echo("\n─── LLM Configuration ────────────────────────────────────────")
     typer.echo("Checking providers in priority order: claude → codex → gemini → local\n")
 
+    # GitHub username → determines the GHCR image name
+    github_username = typer.prompt(
+        "GitHub username (for GHCR image ghcr.io/<username>/agentic-research)",
+        default="",
+    )
+    framework_image = (
+        f"ghcr.io/{github_username}/agentic-research:latest"
+        if github_username.strip()
+        else "ghcr.io/your-username/agentic-research:latest"
+    )
+
     env_vars: dict[str, str] = {
         "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/agentic-research",
         "MLFLOW_TRACKING_URI": "http://localhost:5000",
         "FRAMEWORK_API_URL": "http://localhost:7001",
         "AGENTIC_HOME": str(_GLOBAL_DIR),
         "VOLUME_BASE_DIR": str(_DATA_DIR),
+        "FRAMEWORK_IMAGE": framework_image,
     }
     llm_chain: list[str] = []
 
     # Claude
     typer.echo("[1] Claude")
-    claude_cred = Path.home() / ".claude" / "credentials"
+    claude_cred = Path.home() / ".claude" / ".credentials.json"
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    print(claude_cred)
     if claude_cred.exists():
         typer.echo(f"    ✓ Found: {claude_cred}")
         use = typer.confirm("    Use as primary?", default=True)
@@ -111,7 +124,7 @@ def setup():
     # Gemini
     typer.echo("\n[3] Gemini (fallback)")
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
-    gcloud_dir = Path.home() / ".config" / "gcloud"
+    gcloud_dir = Path.home() / ".gemini"
     if gemini_key:
         typer.echo(f"    ✓ Found Gemini API key in environment")
         use = typer.confirm("    Use as fallback?", default=True)
@@ -170,9 +183,10 @@ def setup():
     _setup_planka(env_vars)
 
     typer.echo("\n✓ Setup complete.")
-    typer.echo(f"  Config dir : {_GLOBAL_DIR}")
-    typer.echo(f"  .env       : {_ENV_FILE}")
-    typer.echo("  Services   : postgres | mlflow | planka | framework-api")
+    typer.echo(f"  Config dir      : {_GLOBAL_DIR}")
+    typer.echo(f"  .env            : {_ENV_FILE}")
+    typer.echo(f"  Framework image : {framework_image}")
+    typer.echo("  Docker services : postgres | mlflow | planka | framework-api")
     typer.echo("\nNext step: agentic-research init <project-name>")
 
 
@@ -197,7 +211,7 @@ def _write_env(path: Path, vars: dict) -> None:
     lines.append("")
     lines.append("# Infrastructure")
     for k in ("DATABASE_URL", "MLFLOW_TRACKING_URI", "FRAMEWORK_API_URL",
-              "AGENTIC_HOME", "VOLUME_BASE_DIR"):
+              "AGENTIC_HOME", "VOLUME_BASE_DIR", "FRAMEWORK_IMAGE"):
         if k in vars:
             lines.append(f"{k}={vars[k]}")
     lines.append("")

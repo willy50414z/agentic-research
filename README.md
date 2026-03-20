@@ -164,7 +164,7 @@ cd agentic-research
 
 # 建立虛擬環境（建議）
 python -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
+source E:\Code\agentic-research\venv\Scripts\activate      # Windows: venv\Scripts\activate
 
 # 安裝 agentic-research 指令
 pip install -e .
