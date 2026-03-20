@@ -1,0 +1,47 @@
+project:
+  label: {{PROJECT_LABEL}}
+  name: {{PROJECT_NAME}}
+
+research:
+  hypothesis: >
+    # 必填：一到三句話說清楚研究假說
+    # 例：快慢均線交叉可以捕捉趨勢動能，在日線級別的美股上產生正期望值。
+
+  universe:
+    instruments: [AAPL, MSFT, GOOG]
+    asset_class: equity      # equity | futures | crypto | forex
+    frequency: daily
+
+  data:
+    source: yfinance
+    train: [2018-01-01, 2022-12-31]
+    test:  [2023-01-01, 2024-12-31]  # OOS validation period
+
+  signals:
+    entry: "SMA(close, fast_period) crosses above SMA(close, slow_period)"
+    exit:  "SMA(close, fast_period) crosses below SMA(close, slow_period)"
+
+  optimization:
+    method: grid_search
+    parameters:
+      fast_period: [5, 10, 15, 20, 30]
+      slow_period: [40, 60, 80, 100]
+
+  performance:              # analyze_node PASS/FAIL criteria
+    sharpe_ratio:      { min: 1.0  }
+    max_drawdown:      { max: 0.20 }
+    profit_factor:     { min: 1.2  }
+    win_rate:          { min: 0.45 }
+    oos_profit_factor: { min: 1.1  }
+
+  tools:
+    backtest_engine: freqtrade
+    data_source: yfinance
+
+  plugin: quant_strategy
+  review_interval: 5       # PASS loops between human review checkpoints
+  max_loops: 30
+
+  notes: >
+    # 給 LLM 的額外研究方向指引（可選）
+    # 例：優先測試短週期交叉，避免參數過擬合。

@@ -34,7 +34,11 @@ def create_project(
                 """
                 INSERT INTO projects (id, name, plugin_name, goal, config)
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT (id) DO UPDATE SET
+                    name        = EXCLUDED.name,
+                    plugin_name = EXCLUDED.plugin_name,
+                    goal        = EXCLUDED.goal,
+                    config      = EXCLUDED.config
                 """,
                 (project_id, name, plugin_name, goal, json.dumps(config or {})),
             )

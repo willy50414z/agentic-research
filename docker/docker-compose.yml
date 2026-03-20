@@ -10,7 +10,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ${VOLUME_BASE_DIR}/mlflow:/mlflow
+      - ${VOLUME_BASE_DIR:-../data}/mlflow:/mlflow
     command: >
       mlflow server
       --host 0.0.0.0
@@ -23,12 +23,15 @@ services:
     container_name: planka
     restart: always
     volumes:
-      - ${VOLUME_BASE_DIR}/user-avatars:/app/public/user-avatars
-      - ${VOLUME_BASE_DIR}/project-background-images:/app/public/project-background-images
-      - ${VOLUME_BASE_DIR}/attachments:/app/private/attachments
+      - ${VOLUME_BASE_DIR:-../data}/user-avatars:/app/public/user-avatars
+      - ${VOLUME_BASE_DIR:-../data}/project-background-images:/app/public/project-background-images
+      - ${VOLUME_BASE_DIR:-../data}/attachments:/app/private/attachments
     ports:
       - "7002:1337"
     env_file: ../.env
+    environment:
+      # Override DATABASE_URL so Planka uses the postgres container hostname, not localhost
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agentic-research
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,7 +41,7 @@ services:
     container_name: agentic-research-postgres
     restart: always
     volumes:
-      - ${VOLUME_BASE_DIR}/postgres:/var/lib/postgresql/data
+      - ${VOLUME_BASE_DIR:-../data}/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     env_file: ../.env

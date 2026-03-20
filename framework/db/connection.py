@@ -53,7 +53,7 @@ def get_connection(db_url: str | None = None):
 def run_migration(sql_path: str, db_url: str | None = None) -> None:
     """Execute a SQL migration file against the database."""
     with get_connection(db_url) as conn:
-        with open(sql_path, "r") as f:
+        with open(sql_path, "r", encoding="utf-8") as f:
             sql = f.read()
         with conn.cursor() as cur:
             cur.execute(sql)

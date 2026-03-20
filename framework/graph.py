@@ -3,20 +3,21 @@ framework/graph.py
 
 Core LangGraph graph builder for the agentic research workflow.
 
-Graph flow:
-    START → plan → implement* → test → analyze
-                                          │ FAIL → revise → implement* (no interrupt)
-                                          │ PASS → summarize
-                                          │           │ N loops → notify_planka** → plan | implement | END
-                                          │           │ continue → plan
-                                          │ TERMINATE → END
+Graph flow (fully automatic except for loop_review):
+    START → plan → implement → test → analyze
+                                          │ FAIL → revise → implement
+                                          │ PASS → summarize → record_metrics
+                                          │           │ every N loops → notify_planka [INTERRUPT]
+                                          │           │ continue/replan → plan
+                                          │ TERMINATE → record_terminate_metrics → END
 
-    *  implement calls interrupt() when needs_human_approval=True (after plan)
-    ** notify_planka calls interrupt() to wait for loop-review decision
+Human-in-the-loop:
+    Only notify_planka calls interrupt() to wait for the loop-review decision.
+    Planning-column review (Phase 1 spec clarification) is handled externally
+    via Planka card position + spec.md edits — not via LangGraph interrupt.
 
-Resume patterns:
-    - After plan review interrupt:   graph.invoke(Command(resume={"action": "approve"}), config)
-    - After loop review interrupt:   graph.invoke(Command(resume={"action": "continue"|"replan"|"terminate", "notes": "..."}), config)
+Resume pattern (loop review only):
+    graph.invoke(Command(resume={"action": "continue"|"replan"|"terminate", "notes": "..."}), config)
 """
 
 import logging
@@ -40,6 +41,7 @@ class ResearchState(TypedDict):
     project_id: str
     loop_index: int
     loop_goal: str
+    spec: Optional[dict]                # full structured spec injected at start time
     implementation_plan: Optional[dict]
     last_result: str                    # PASS | FAIL | TERMINATE | UNKNOWN
     last_reason: str

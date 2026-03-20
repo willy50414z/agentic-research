@@ -1,17 +1,21 @@
 """
 projects/dummy/plugin.py
 
-DummyPlugin — for Phase 1 end-to-end testing of the framework.
+DummyPlugin — for end-to-end testing of the framework.
 
 Behaviour:
-  - plan:      logs and sets a trivial implementation_plan; requires human approval.
-  - implement: calls interrupt() for plan review (when needs_human_approval=True),
-               then "implements" by sleeping briefly.
+  - plan:      generates a trivial implementation_plan (fully automatic, no interrupt).
+  - implement: runs immediately with no human approval required.
   - test:      returns canned metrics.
   - analyze:   FAIL on the first attempt within a loop, PASS on the second.
                TERMINATE if loop_index >= 6.
-  - revise:    logs and updates loop_goal with a note.
+  - revise:    logs and updates last_reason.
   - summarize: generates a brief text summary, writes to ./artifacts/.
+
+Human-in-the-loop:
+  Only loop_review (every N PASS loops via notify_planka) requires human input.
+  Planning-column review is handled externally via Planka + spec.md edits.
+  No plan_review interrupt inside the graph.
 
 No actual CLI agents are called — all outputs are deterministic for easy testing.
 """
@@ -20,8 +24,6 @@ import logging
 import time
 import os
 from pathlib import Path
-
-from langgraph.types import interrupt, Command
 
 from framework.plugin_interface import ResearchPlugin
 from framework.plugin_registry import register
@@ -64,35 +66,16 @@ class DummyPlugin(ResearchPlugin):
         return {
             "loop_goal": goal,
             "implementation_plan": plan,
-            "needs_human_approval": True,  # triggers interrupt in implement_node
-            "last_checkpoint_decision": None,  # clear after consuming
+            "needs_human_approval": False,
+            "last_checkpoint_decision": None,
         }
 
     # -----------------------------------------------------------------------
-    # implement
+    # implement — runs automatically, no interrupt
     # -----------------------------------------------------------------------
 
     def implement_node(self, state: dict) -> dict:
         loop_index = state.get("loop_index", 0)
-
-        if state.get("needs_human_approval", False):
-            logger.info("[DummyPlugin] implement: waiting for human plan approval (loop %d).", loop_index)
-            decision = interrupt({
-                "checkpoint": "plan_review",
-                "loop_index": loop_index,
-                "plan": state.get("implementation_plan"),
-                "instruction": "Resume with: {'action': 'approve'} or {'action': 'reject', 'reason': '...'}",
-            })
-
-            if isinstance(decision, dict) and decision.get("action") == "reject":
-                reason = decision.get("reason", "Plan rejected by human.")
-                logger.info("[DummyPlugin] implement: plan rejected — %s", reason)
-                return {
-                    "last_result": "TERMINATE",
-                    "last_reason": reason,
-                    "needs_human_approval": False,
-                }
-
         logger.info("[DummyPlugin] implement: executing loop %d.", loop_index)
         time.sleep(0.3)  # simulate work
 
@@ -110,7 +93,6 @@ class DummyPlugin(ResearchPlugin):
 
     def test_node(self, state: dict) -> dict:
         loop_index = state.get("loop_index", 0)
-        # Track how many times we've attempted this loop (for FAIL→PASS logic)
         attempt = state.get("attempt_count", 0) + 1
         logger.info("[DummyPlugin] test: loop %d attempt %d.", loop_index, attempt)
         time.sleep(0.2)
@@ -132,12 +114,11 @@ class DummyPlugin(ResearchPlugin):
         attempt = state.get("attempt_count", 1)
         metrics = state.get("test_metrics", {})
 
-        # Terminate after 6 successful loops
         if loop_index >= 6:
             logger.info("[DummyPlugin] analyze: loop_index=%d >= 6, terminating.", loop_index)
             return {"last_result": "TERMINATE", "last_reason": f"Reached max loops ({loop_index})."}
 
-        # FAIL on first attempt, PASS on second (simulates revise→implement cycle)
+        # FAIL on first attempt, PASS on second
         if attempt < 2:
             reason = (
                 f"Loop {loop_index} attempt {attempt}: "
@@ -161,11 +142,7 @@ class DummyPlugin(ResearchPlugin):
     def revise_node(self, state: dict) -> dict:
         loop_index = state.get("loop_index", 0)
         logger.info("[DummyPlugin] revise: proposing fix for loop %d.", loop_index)
-        # Keep the original goal; revision note lives in last_reason so it doesn't accumulate
-        return {
-            "last_reason": f"Loop {loop_index}: tighten entry filter and retry.",
-            "needs_human_approval": False,  # no interrupt for revise→implement
-        }
+        return {"last_reason": f"Loop {loop_index}: tighten entry filter and retry."}
 
     # -----------------------------------------------------------------------
     # summarize
@@ -195,12 +172,12 @@ class DummyPlugin(ResearchPlugin):
             "loop_index": new_loop_index,
             "loop_count_since_review": new_count,
             "last_reason": summary,
-            "attempt_count": 0,  # reset per-loop attempt counter
+            "attempt_count": 0,
             "artifacts": state.get("artifacts", []) + [{"type": "summary", "path": artifact_path}],
         }
 
     def get_review_interval(self) -> int:
-        return 3  # checkpoint every 3 PASS loops (quick for testing)
+        return 3  # loop_review every 3 PASS loops
 
 
 # ---------------------------------------------------------------------------
