@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from langgraph.types import Command
 
 from framework.db.queries import create_project, get_project, record_checkpoint_decision
+from framework.db.connection import run_migration
 from framework.plugin_registry import resolve as resolve_plugin
 from framework.graph import get_or_build_graph
 from framework.spec_clarifier import (
@@ -453,9 +454,25 @@ async def _scan_spec_pending_projects() -> None:
 
 @app.on_event("startup")
 async def startup_event():
+    _run_migrations()
     _ensure_planka_columns()
     asyncio.create_task(_scheduler_loop())
     logger.info("Scheduler started.")
+
+
+def _run_migrations() -> None:
+    import pathlib
+    migrations_dir = pathlib.Path(__file__).parent.parent.parent / "db" / "migrations"
+    if not migrations_dir.exists():
+        logger.warning("Migrations directory not found: %s", migrations_dir)
+        return
+    for sql_file in sorted(migrations_dir.glob("*.sql")):
+        try:
+            run_migration(str(sql_file))
+            logger.info("Migration applied: %s", sql_file.name)
+        except Exception as e:
+            logger.error("Migration failed (%s): %s", sql_file.name, e)
+            raise
 
 
 # ---------------------------------------------------------------------------
