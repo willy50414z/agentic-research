@@ -63,7 +63,7 @@ _Edit this file freely, then run `./start.sh`. The AI agent will parse it._
 
 ## Settings
 
-- **Plugin**: quant_strategy
+- **Plugin**: quant_alpha
 - **Review every**: 5 loops
 - **Max loops**: 30
 

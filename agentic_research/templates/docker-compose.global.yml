@@ -77,6 +77,10 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LOCAL_LLM_ENDPOINT: ${LOCAL_LLM_ENDPOINT:-http://host.docker.internal:11434}
       LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.2}
+      ARTIFACTS_DIR: /artifacts
+    volumes:
+      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/root/.claude:ro
+      - ${VOLUME_BASE_DIR:-./data}/artifacts:/artifacts
     ports:
       - "7001:8000"
     depends_on:

@@ -22,6 +22,7 @@ import logging
 import os
 from pathlib import Path
 
+import mlflow
 from langgraph.types import interrupt
 
 from framework.plugin_interface import ResearchPlugin
@@ -34,6 +35,33 @@ from projects.quant_alpha.backtest import run_backtest
 logger = logging.getLogger(__name__)
 
 ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR", "./artifacts"))
+
+_MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI")
+if _MLFLOW_URI:
+    mlflow.set_tracking_uri(_MLFLOW_URI)
+
+
+def _mlflow_log(project_id: str, loop: int, plan: dict, metrics: dict, result: str) -> None:
+    """Log loop metrics to MLflow. Silently skips if MLflow is unreachable."""
+    if not _MLFLOW_URI:
+        return
+    try:
+        mlflow.set_experiment(project_id)
+        with mlflow.start_run(run_name=f"loop_{loop}"):
+            mlflow.log_param("strategy_type",   plan.get("strategy_type", "unknown"))
+            mlflow.log_param("lookback",         plan.get("lookback"))
+            mlflow.log_param("entry_threshold",  plan.get("entry_threshold"))
+            mlflow.log_param("exit_threshold",   plan.get("exit_threshold"))
+            mlflow.log_param("stop_loss_pct",    plan.get("stop_loss_pct"))
+            mlflow.log_param("loop_result",      result)
+            mlflow.log_metric("win_rate",      metrics.get("win_rate", 0))
+            mlflow.log_metric("alpha_ratio",   metrics.get("alpha_ratio", 0))
+            mlflow.log_metric("max_drawdown",  metrics.get("max_drawdown", 0))
+            mlflow.log_metric("n_trades",      metrics.get("n_trades", 0))
+            mlflow.log_metric("total_return",  metrics.get("total_return", 0))
+        logger.info("[QuantAlpha] mlflow logged: project=%s loop=%d result=%s", project_id, loop, result)
+    except Exception as e:
+        logger.warning("[QuantAlpha] mlflow log failed (loop=%d): %s", loop, e)
 _PROMPTS_DIR  = Path(__file__).parent / "prompts"
 
 # Default strategy used by rule-based fallback when LLM is unavailable.
@@ -252,6 +280,14 @@ class QuantAlphaPlugin(ResearchPlugin):
         else:
             logger.info("[QuantAlpha] analyze  ✘ FAIL — %s → will revise params", reason)
 
+        _mlflow_log(
+            project_id=state.get("project_id", "unknown"),
+            loop=loop,
+            plan=plan,
+            metrics=metrics,
+            result=result,
+        )
+
         return {"last_result": result, "last_reason": reason}
 
     def _rule_based_analyze(self, loop, plan, metrics):
@@ -403,6 +439,68 @@ class QuantAlphaPlugin(ResearchPlugin):
             "artifacts": state.get("artifacts", []) + [
                 {"type": "summary", "path": artifact_path}
             ],
+        }
+
+    # ── terminate_summarize ───────────────────────────────────────────────────
+
+    def terminate_summarize_node(self, state: dict) -> dict:
+        loop    = state.get("loop_index", 0)
+        plan    = state.get("implementation_plan") or {}
+        metrics = state.get("test_metrics") or {}
+        goal    = state.get("loop_goal", "")
+        reason  = state.get("last_reason", "Max attempts reached.")
+        attempt = state.get("attempt_count", 0)
+        logger.info("[QuantAlpha] terminate_summarize  loop=%d  attempts=%d", loop, attempt)
+
+        # Build attempts table from artifacts in state
+        artifacts = list(state.get("artifacts") or [])
+        attempts_lines = []
+        for a in artifacts:
+            if a.get("type") == "train_result":
+                attempts_lines.append(f"  - {a['path']}")
+
+        # Last test metrics row
+        if metrics:
+            attempts_lines.append(
+                f"  - final: win_rate={metrics.get('win_rate',0):.4f} "
+                f"alpha={metrics.get('alpha_ratio',0):.4f} "
+                f"drawdown={metrics.get('max_drawdown',0):.4f} "
+                f"trades={metrics.get('n_trades',0)}"
+            )
+        attempts_table = "\n".join(attempts_lines) if attempts_lines else "  (no attempts recorded)"
+
+        prompt = _load_prompt("terminate_summary").format(
+            project_id      = state.get("project_id", "?"),
+            goal            = goal,
+            strategy_type   = plan.get("strategy_type", "?"),
+            terminate_reason= reason,
+            attempt_count   = attempt,
+            attempts_table  = attempts_table,
+            target_win_rate = plan.get("target_win_rate", _PASS_WIN_RATE),
+        )
+
+        report_md = ""
+        summary   = ""
+        try:
+            raw       = _call_llm(prompt)
+            report_md = (_extract_tag(raw, "CONTENT") or "").strip()
+            summary   = (_extract_tag(raw, "REASON")  or "").strip()
+            logger.info("[QuantAlpha] terminate_summarize  LLM report generated (%d chars)", len(report_md))
+        except (FileNotFoundError, RuntimeError) as e:
+            logger.warning("[QuantAlpha] terminate_summarize  LLM unavailable (%s) — using default", e)
+
+        if not report_md:
+            # Fall back to base-class template
+            result = super().terminate_summarize_node(state)
+            return result
+
+        artifact_path = str(ARTIFACTS_DIR / f"loop_{loop}_terminate_report.md")
+        _write_artifact(artifact_path, report_md)
+        logger.info("[QuantAlpha] terminate_summarize  report → %s", artifact_path)
+
+        return {
+            "last_reason": summary or f"Loop {loop} TERMINATE: {reason}",
+            "artifacts": artifacts + [{"type": "terminate_summary", "path": artifact_path}],
         }
 
     def get_review_interval(self) -> int:

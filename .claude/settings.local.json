@@ -6,7 +6,15 @@
       "Bash(docker exec:*)",
       "Bash(docker compose:*)",
       "Bash(docker build:*)",
-      "Bash(docker rm:*)"
+      "Bash(docker rm:*)",
+      "Bash(docker ps:*)",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(agentic-research --version)",
+      "Bash(python -m agentic_research --version)",
+      "Bash(grep:*)",
+      "Bash(FRAMEWORK_IMAGE=agentic-research:latest docker compose -f docker/docker-compose.global.yml up -d --no-deps framework-api)",
+      "Bash(curl -s http://localhost:7002/api/config)",
+      "Bash(curl:*)"
     ]
   }
 }

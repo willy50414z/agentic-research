@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 全域安裝 Claude CLI (正式使用時取消註解)
-# RUN npm install -g @anthropic-ai/claude-code
+# 全域安裝 Claude CLI
+RUN npm install -g @anthropic-ai/claude-code
 
 # 安裝 Python 依賴 — 使用 repo root 的釘版 requirements.txt
 COPY requirements.txt ./requirements.txt

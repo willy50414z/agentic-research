@@ -61,6 +61,23 @@ def get_project(project_id: str, db_url: str | None = None) -> dict | None:
     }
 
 
+def get_planka_card_id(project_id: str, db_url: str | None = None) -> str | None:
+    """Read planka_card_id from projects.config JSONB."""
+    row = get_project(project_id, db_url)
+    return (row.get("config") or {}).get("planka_card_id") if row else None
+
+
+def set_planka_card_id(project_id: str, card_id: str, db_url: str | None = None) -> None:
+    """Merge planka_card_id into projects.config JSONB."""
+    with get_connection(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE projects SET config = config || %s::jsonb WHERE id = %s",
+                (json.dumps({"planka_card_id": card_id}), project_id),
+            )
+    logger.debug("planka_card_id persisted for project '%s'.", project_id)
+
+
 # ---------------------------------------------------------------------------
 # loop_metrics
 # ---------------------------------------------------------------------------

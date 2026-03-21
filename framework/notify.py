@@ -15,7 +15,6 @@ This keeps Planka fully optional — Phase 1-2 can run without it.
 
 import os
 import logging
-import httpx
 from langgraph.types import interrupt
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ PLANKA_TOKEN = os.getenv("PLANKA_TOKEN", "")
 def notify_planka_node(state: dict) -> dict:
     """
     LangGraph node that:
-      1. Optionally creates a Planka review card.
+      1. Posts a review-checkpoint comment to the project's Planka card.
       2. Calls interrupt() to pause and wait for human loop-review decision.
       3. Returns state update with decision and reset loop counter.
 
@@ -38,12 +37,12 @@ def notify_planka_node(state: dict) -> dict:
     loop_index = state.get("loop_index", 0)
     summary = state.get("last_reason", "No summary available.")
 
-    # --- Optional: create Planka card ---
+    # Post checkpoint comment to the main project card
     if PLANKA_URL and PLANKA_TOKEN:
-        _create_planka_card(project_id, loop_index, summary)
+        _post_checkpoint_comment(project_id, loop_index, summary)
     else:
         logger.info(
-            "[notify_planka] Planka not configured — skipping card creation. "
+            "[notify_planka] Planka not configured — skipping comment. "
             "Set PLANKA_API_URL + PLANKA_TOKEN to enable."
         )
 
@@ -70,36 +69,22 @@ def notify_planka_node(state: dict) -> dict:
     }
 
 
-def _create_planka_card(project_id: str, loop_index: int, summary: str) -> None:
-    """Create a review card in Planka. Non-blocking — logs warning on failure."""
+def _post_checkpoint_comment(project_id: str, loop_index: int, summary: str) -> None:
+    """Post a review-checkpoint comment on the main project card. Non-blocking."""
     try:
-        # Planka REST API: POST /api/cards
-        # Requires board_id / list_id — read from env or project config.
-        board_list_id = os.getenv("PLANKA_REVIEW_LIST_ID", "")
-        if not board_list_id:
-            logger.warning("[notify_planka] PLANKA_REVIEW_LIST_ID not set, skipping card.")
-            return
-
-        card_data = {
-            "boardListId": board_list_id,
-            "name": f"[{project_id}] Loop {loop_index} Review",
-            "description": (
-                f"**Project:** {project_id}\n"
-                f"**Loop:** {loop_index}\n\n"
-                f"**Summary:**\n{summary}\n\n"
-                f"**thread_id:** {project_id}\n\n"
-                f"Move this card to **Approved** or **Rejected**, "
-                f"then run:\n"
-                f"  `python cli/main.py approve --project {project_id} --action continue`"
-            ),
-        }
-        resp = httpx.post(
-            f"{PLANKA_URL}/api/cards",
-            headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-            json=card_data,
-            timeout=10,
+        from framework.planka import PlankaSink
+        sink = PlankaSink(
+            PLANKA_URL,
+            PLANKA_TOKEN,
+            os.getenv("PLANKA_BOARD_ID", ""),
+            os.getenv("DATABASE_URL", ""),
         )
-        resp.raise_for_status()
-        logger.info("[notify_planka] Planka card created: %s", resp.json().get("item", {}).get("id"))
+        text = (
+            f"[REVIEW CHECKPOINT] Loop {loop_index}\n\n"
+            f"{summary[:500]}\n\n"
+            f"Awaiting human decision: **continue** / **replan** / **terminate**"
+        )
+        sink.post_comment(project_id, text)
+        logger.info("[notify_planka] Checkpoint comment posted for project '%s' loop %d.", project_id, loop_index)
     except Exception as e:
-        logger.warning("[notify_planka] Planka card creation failed (non-blocking): %s", e)
+        logger.warning("[notify_planka] Checkpoint comment failed (non-blocking): %s", e)

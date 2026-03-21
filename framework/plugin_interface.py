@@ -97,6 +97,55 @@ class ResearchPlugin(ABC):
     # Optional overrides
     # ------------------------------------------------------------------
 
+    def terminate_summarize_node(self, state: dict) -> dict:
+        """
+        Generate a summary report when the research terminates without PASS.
+
+        Called just before END on the TERMINATE path.
+        Default implementation writes a plain-text markdown summary from state.
+        Override in plugins to add LLM-generated analysis.
+
+        Writes:
+            last_reason: summary text
+            artifacts:   append report ref
+        """
+        import json
+        import os
+        from pathlib import Path
+
+        loop      = state.get("loop_index", 0)
+        plan      = state.get("implementation_plan") or {}
+        metrics   = state.get("test_metrics") or {}
+        artifacts = list(state.get("artifacts") or [])
+        goal      = state.get("loop_goal", "")
+        reason    = state.get("last_reason", "Max attempts reached.")
+
+        report_md = (
+            f"# Termination Report — Loop {loop}\n\n"
+            f"**Strategy**: {plan.get('strategy_type', '?')}\n"
+            f"**Goal**: {goal}\n"
+            f"**Reason**: {reason}\n\n"
+            f"## Final Metrics\n\n"
+            f"| Metric | Value |\n|---|---|\n"
+            f"| win_rate     | {metrics.get('win_rate', 0):.4f} |\n"
+            f"| alpha_ratio  | {metrics.get('alpha_ratio', 0):.4f} |\n"
+            f"| max_drawdown | {metrics.get('max_drawdown', 0):.4f} |\n"
+            f"| n_trades     | {metrics.get('n_trades', 0)} |\n\n"
+            f"## Next Steps\n\nReview parameters and restart from Planning.\n"
+        )
+        summary = f"Loop {loop} TERMINATE: {reason}"
+
+        artifacts_dir = Path(os.getenv("ARTIFACTS_DIR", "./artifacts"))
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        report_path = str(artifacts_dir / f"loop_{loop}_terminate_report.md")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(report_md)
+
+        return {
+            "last_reason": summary,
+            "artifacts": artifacts + [{"type": "terminate_summary", "path": report_path}],
+        }
+
     def get_review_interval(self) -> int:
         """Number of PASS loops between human review checkpoints. Default: 5."""
         return 5

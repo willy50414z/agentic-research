@@ -58,6 +58,9 @@ _COL_REVIEW        = "Review"
 _COL_DONE          = "Done"
 _COL_FAILED        = "Failed"
 
+# Shared PlankaSink singleton — initialized in startup_event()
+_planka_sink = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,7 +71,7 @@ def _get_graph(project_id: str):
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
     plugin = resolve_plugin(project["plugin_name"])
-    config = {"db_url": DATABASE_URL, **project.get("config", {})}
+    config = {"db_url": DATABASE_URL, **project.get("config", {}), "planka_sink": _planka_sink}
     return get_or_build_graph(plugin, config)
 
 
@@ -77,11 +80,24 @@ def _thread_config(project_id: str) -> dict:
 
 
 def _has_checkpoint(graph, project_id: str) -> bool:
+    """Return True only if the graph has an ACTIVE (interrupted) checkpoint."""
     try:
         state = graph.get_state(config=_thread_config(project_id))
-        return bool(state and state.values)
+        # state.next is non-empty only when the graph is paused at an interrupt
+        return bool(state and state.values and state.next)
     except Exception:
         return False
+
+
+def _graph_terminated(graph, project_id: str) -> bool:
+    """Return True if the graph completed with last_result == TERMINATE."""
+    try:
+        state = graph.get_state(config=_thread_config(project_id))
+        if state and state.values:
+            return state.values.get("last_result") == "TERMINATE"
+    except Exception:
+        pass
+    return False
 
 
 def _build_initial_state(project: dict, answers: dict | None = None) -> dict:
@@ -134,14 +150,14 @@ def _run_resume_bg(project_id: str, decision: dict) -> None:
             db_url=DATABASE_URL,
         )
 
-        # Move Planka card based on decision
-        # replan → stays in Verify (graph replans internally and continues automatically)
-        # Planning column is only for Phase 1 spec review waiting
         action = decision.get("action", "")
-        if action in ("continue", "replan"):
-            _move_planka_card(project_id, _COL_VERIFY)
-        elif action == "terminate":
+        if action == "terminate":
             _move_planka_card(project_id, _COL_DONE)
+        elif _graph_terminated(graph, project_id):
+            # Graph ended with TERMINATE (max attempts/loops) → back to Planning
+            _move_planka_card(project_id, _COL_PLANNING)
+        else:
+            _move_planka_card(project_id, _COL_VERIFY)
 
         logger.info("Resumed project '%s' with action: %s", project_id, action)
     except Exception as e:
@@ -157,14 +173,19 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
             logger.error("Cannot start: project '%s' not found.", project_id)
             return
         plugin = resolve_plugin(project["plugin_name"])
-        config = {"db_url": DATABASE_URL, **(project.get("config") or {})}
+        config = {"db_url": DATABASE_URL, **(project.get("config") or {}), "planka_sink": _planka_sink}
         graph = get_or_build_graph(plugin, config)
 
         # Ensure card is in Verify (idempotent move)
         _move_planka_card(project_id, _COL_VERIFY)
 
         graph.invoke(initial_state, config=_thread_config(project_id))
-        logger.info("Graph completed for project '%s'.", project_id)
+
+        if _graph_terminated(graph, project_id):
+            _move_planka_card(project_id, _COL_PLANNING)
+            logger.info("Graph terminated for project '%s' — card → Planning.", project_id)
+        else:
+            logger.info("Graph completed for project '%s'.", project_id)
     except Exception as e:
         logger.exception("Background start failed for project '%s': %s", project_id, e)
         _move_planka_card(project_id, _COL_FAILED)
@@ -271,6 +292,9 @@ async def start_project(body: StartRequest, background_tasks: BackgroundTasks):
     # Move card → Spec Pending Review
     _move_planka_card_to_column(project_id, project_name, _COL_SPEC_PENDING)
 
+    # Upload spec content to card description
+    _upload_spec_to_planka(project_id, body.spec_md or "")
+
     # LLM spec review
     clarifications = generate_clarifications(spec, llm_fn=llm_fn)
 
@@ -315,7 +339,7 @@ async def resume(body: ResumeRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
     plugin = resolve_plugin(project["plugin_name"])
-    config = {"db_url": DATABASE_URL, **(project.get("config") or {})}
+    config = {"db_url": DATABASE_URL, **(project.get("config") or {}), "planka_sink": _planka_sink}
     graph = get_or_build_graph(plugin, config)
 
     if _has_checkpoint(graph, project_id):
@@ -454,8 +478,13 @@ async def _scan_spec_pending_projects() -> None:
 
 @app.on_event("startup")
 async def startup_event():
+    global _planka_sink
     _run_migrations()
     _ensure_planka_columns()
+    if PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID:
+        from framework.planka import PlankaSink
+        _planka_sink = PlankaSink(PLANKA_URL, PLANKA_TOKEN, PLANKA_BOARD_ID, DATABASE_URL)
+        logger.info("PlankaSink initialized.")
     asyncio.create_task(_scheduler_loop())
     logger.info("Scheduler started.")
 
@@ -478,6 +507,14 @@ def _run_migrations() -> None:
 # ---------------------------------------------------------------------------
 # Planka helpers
 # ---------------------------------------------------------------------------
+
+def _upload_spec_to_planka(project_id: str, spec_md: str) -> None:
+    """Update the Planka card description with the full spec content."""
+    if not _planka_sink or not spec_md:
+        return
+    description = f"thread_id: {project_id}\n\n---\n\n{spec_md[:10_000]}"
+    _planka_sink.update_card_description(project_id, description)
+
 
 def _extract_thread_id(description: str) -> str | None:
     match = re.search(r"thread_id:\s*(\S+)", description)
@@ -552,14 +589,16 @@ def _move_planka_card_to_column(project_id: str, project_name: str, column_name:
             return
 
         if existing_card_id:
+            if _planka_sink:
+                _planka_sink.cache_card_id(project_id, existing_card_id)
             httpx.patch(
                 f"{PLANKA_URL}/api/cards/{existing_card_id}",
                 headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-                json={"listId": target_list_id},
+                json={"listId": target_list_id, "position": 65535},
                 timeout=10,
             )
         else:
-            httpx.post(
+            r = httpx.post(
                 f"{PLANKA_URL}/api/lists/{target_list_id}/cards",
                 headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
                 json={
@@ -570,6 +609,12 @@ def _move_planka_card_to_column(project_id: str, project_name: str, column_name:
                 },
                 timeout=10,
             )
+            try:
+                new_card_id = r.json().get("item", {}).get("id")
+                if new_card_id and _planka_sink:
+                    _planka_sink.cache_card_id(project_id, new_card_id)
+            except Exception:
+                pass
         logger.info("Planka card for project '%s' placed in '%s'.", project_id, column_name)
     except Exception as e:
         logger.warning("Planka card operation failed for project '%s': %s", project_id, e)
@@ -601,10 +646,12 @@ def _move_planka_card(project_id: str, column_name: str) -> None:
                 card_id = card.get("id")
 
         if card_id and target_list_id:
+            if _planka_sink:
+                _planka_sink.cache_card_id(project_id, card_id)
             httpx.patch(
                 f"{PLANKA_URL}/api/cards/{card_id}",
                 headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-                json={"listId": target_list_id},
+                json={"listId": target_list_id, "position": 65535},
                 timeout=10,
             )
             logger.info("Moved Planka card for project '%s' to '%s'.", project_id, column_name)
