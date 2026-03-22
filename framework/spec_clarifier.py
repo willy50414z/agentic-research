@@ -1,548 +1,283 @@
 """
 framework/spec_clarifier.py
 
-Phase 1 spec processing: markdown parsing + rule validation + LLM clarification.
+Dual-LLM spec-writing agent for the Planka-first workflow.
 
-User-facing files use .md (readable); internal processing uses dict (YAML-compatible).
+Flow:
+  1. Primary agent downloads spec.md, rewrites it with full domain detail, uploads new version.
+  2. Secondary agent reviews for executability/consistency, uploads final version.
+  3. Framework parses final spec.md with regex to extract structured fields.
 
-Responsibilities:
-  - load_spec_md(path)           → dict  (LLM converts .md → structured dict)
-  - load_spec(path)              → dict  (load .yaml spec, for backward compat)
-  - validate_spec(spec)          → raises SpecValidationError on missing required fields
-  - generate_clarifications(spec, llm_fn) → list[dict]  (field, original, question, answer)
-  - write_clarified_md(path, spec, clarifications)  → spec.clarified.md (markdown Q&A)
-  - write_clarified_spec(path, spec, clarifications) → spec.clarified.yaml (legacy)
-  - read_clarified_answers_md(path) → dict[field, answer]
-  - read_clarified_answers(path) → dict[field, answer]
-  - all_answered(clarifications) → bool
+LLM output format: pure markdown spec.md + <!-- AGENT_META ... --> block at the end.
+Framework parses metadata from the HTML comment block — LLM never outputs JSON.
 """
 
+import logging
+import os
 import re
-import textwrap
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import yaml
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Exceptions
+# Result dataclass
 # ---------------------------------------------------------------------------
 
-class SpecValidationError(ValueError):
-    pass
-
-
-# ---------------------------------------------------------------------------
-# Required fields (dot-notation)
-# ---------------------------------------------------------------------------
-
-_REQUIRED_FIELDS = [
-    "project.label",
-    "research.hypothesis",
-    "research.universe.instruments",
-    "research.data.source",
-    "research.data.train",
-    "research.performance",
-    "research.plugin",
-]
-
-
-# ---------------------------------------------------------------------------
-# Fuzzy fields that LLM should evaluate
-# ---------------------------------------------------------------------------
-
-_FUZZY_FIELDS = [
-    "research.signals.entry",
-    "research.signals.exit",
-    "research.optimization.method",
-    "research.notes",
-]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _get_nested(d: dict, dotpath: str):
-    keys = dotpath.split(".")
-    cur = d
-    for k in keys:
-        if not isinstance(cur, dict) or k not in cur:
-            return None
-        cur = cur[k]
-    return cur
-
-
-def _dict_to_yaml_comment(d: dict, indent: int = 0) -> str:
-    """Render a dict as commented-out YAML lines."""
-    raw = yaml.dump(d, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    lines = raw.splitlines()
-    return "\n".join(" " * indent + "# " + line for line in lines)
+@dataclass
+class SpecAgentResult:
+    needs_user_input: bool
+    questions: list[str]
+    enhanced_spec_md: str       # LLM-rewritten spec.md (metadata block stripped)
+    domain: str
+    agent_notes: str
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def load_spec_md(path: str | Path, llm_fn: Callable[[str], str] | None = None) -> dict:
+def run_spec_agent(
+    spec_md: str,
+    llm_fn: Callable[[str], str] | None,
+    role: str = "primary",
+) -> SpecAgentResult:
     """
-    Load a spec.md file and convert it to a structured dict.
+    Run a spec-writing agent (primary or secondary) against spec_md.
 
-    If llm_fn is provided, the LLM parses the markdown into structured YAML.
-    Otherwise, falls back to a best-effort regex extraction.
+    Args:
+        spec_md:  Current spec.md content (raw markdown string).
+        llm_fn:   Callable(prompt: str) -> str.  If None, returns conservative fallback.
+        role:     "primary" or "secondary" — selects prompt template.
+
+    Returns:
+        SpecAgentResult with enhanced_spec_md (metadata block stripped) and parsed metadata.
     """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"spec.md not found: {p}")
-    md_content = p.read_text(encoding="utf-8")
-
-    if llm_fn is not None:
-        return _md_to_spec_via_llm(md_content, llm_fn)
-    return _md_to_spec_regex(md_content)
-
-
-def _md_to_spec_via_llm(md_content: str, llm_fn: Callable[[str], str]) -> dict:
-    """Use LLM to convert markdown spec to structured YAML dict."""
-    prompt = (
-        "Convert the following research spec (in Markdown) into a structured YAML dict "
-        "with these top-level keys: project (label, name), research (hypothesis, universe, "
-        "data, signals, optimization, performance, tools, plugin, review_interval, max_loops, notes).\n\n"
-        "Output ONLY valid YAML, no code fences, no explanation.\n\n"
-        f"--- spec.md ---\n{md_content}\n---"
-    )
-    try:
-        response = llm_fn(prompt).strip()
-        # Strip code fences if LLM added them
-        if response.startswith("```"):
-            lines = response.splitlines()
-            response = "\n".join(
-                ln for ln in lines
-                if not ln.startswith("```")
-            )
-        data = yaml.safe_load(response)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return _md_to_spec_regex(md_content)
-
-
-def _md_to_spec_regex(md_content: str) -> dict:
-    """
-    Best-effort regex extraction from markdown spec when LLM is unavailable.
-    Extracts project label from h1, hypothesis from ## Hypothesis section, etc.
-    """
-    import re
-
-    def _section(header: str) -> str:
-        pattern = rf"## {re.escape(header)}\s*\n(.*?)(?=\n## |\Z)"
-        m = re.search(pattern, md_content, re.DOTALL)
-        return m.group(1).strip() if m else ""
-
-    # Project label from # heading
-    title_match = re.search(r"^# Research Spec:\s*(.+)$", md_content, re.MULTILINE)
-    project_name = title_match.group(1).strip() if title_match else "unknown"
-    project_label = re.sub(r"[^a-z0-9-]", "-", project_name.lower()).strip("-")
-
-    hypothesis = _section("Hypothesis")
-
-    # Parse instruments list
-    universe_text = _section("Universe")
-    instruments = re.findall(r"\b([A-Z]{1,5})\b", universe_text)
-
-    # Parse data dates
-    data_text = _section("Data")
-    dates = re.findall(r"\d{4}-\d{2}-\d{2}", data_text)
-    train = dates[:2] if len(dates) >= 2 else ["2018-01-01", "2022-12-31"]
-    test = dates[2:4] if len(dates) >= 4 else ["2023-01-01", "2024-12-31"]
-
-    # Signals
-    signals_text = _section("Signals")
-    entry_m = re.search(r"\*\*Entry\*\*:\s*(.+)", signals_text)
-    exit_m = re.search(r"\*\*Exit\*\*:\s*(.+)", signals_text)
-
-    # Settings
-    settings_text = _section("Settings")
-    plugin_m = re.search(r"\*\*Plugin\*\*:\s*(\S+)", settings_text)
-    review_m = re.search(r"Review every\*\*:\s*(\d+)", settings_text)
-    max_m = re.search(r"Max loops\*\*:\s*(\d+)", settings_text)
-
-    return {
-        "project": {"label": project_label, "name": project_name},
-        "research": {
-            "hypothesis": hypothesis,
-            "universe": {
-                "instruments": instruments or ["AAPL"],
-                "asset_class": "equity",
-                "frequency": "daily",
-            },
-            "data": {"source": "yfinance", "train": train, "test": test},
-            "signals": {
-                "entry": entry_m.group(1).strip() if entry_m else "",
-                "exit": exit_m.group(1).strip() if exit_m else "",
-            },
-            "performance": {
-                "sharpe_ratio": {"min": 1.0},
-                "max_drawdown": {"max": 0.20},
-                "profit_factor": {"min": 1.2},
-                "win_rate": {"min": 0.45},
-                "oos_profit_factor": {"min": 1.1},
-            },
-            "plugin": plugin_m.group(1) if plugin_m else "quant_strategy",
-            "review_interval": int(review_m.group(1)) if review_m else 5,
-            "max_loops": int(max_m.group(1)) if max_m else 30,
-            "notes": _section("Notes"),
-        },
-    }
-
-
-def load_spec(path: str | Path) -> dict:
-    """Load and parse spec.yaml from disk."""
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"spec.yaml not found: {p}")
-    with p.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        raise SpecValidationError("spec.yaml must be a YAML mapping.")
-    return data
-
-
-def validate_spec(spec: dict) -> None:
-    """
-    Rule-based validation: check required fields exist and are non-empty.
-    Raises SpecValidationError listing all missing fields.
-    """
-    missing = []
-    for field in _REQUIRED_FIELDS:
-        value = _get_nested(spec, field)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            missing.append(field)
-    if missing:
-        raise SpecValidationError(
-            "Missing required fields in spec.yaml:\n" +
-            "\n".join(f"  - {f}" for f in missing)
+    if llm_fn is None:
+        logger.warning("run_spec_agent: no LLM available — returning spec unchanged.")
+        return SpecAgentResult(
+            needs_user_input=True,
+            questions=["No LLM provider configured. Please set LLM_CHAIN in environment."],
+            enhanced_spec_md=spec_md,
+            domain="unknown",
+            agent_notes="No LLM available.",
         )
 
-
-def generate_clarifications(
-    spec: dict,
-    llm_fn: Callable[[str], str] | None = None,
-) -> list[dict]:
-    """
-    Generate clarification questions for fuzzy fields.
-
-    llm_fn: callable that takes a prompt string and returns the LLM response.
-            If None, uses rule-based placeholder questions.
-
-    Returns a list of:
-        {"field": str, "original": str, "question": str, "answer": ""}
-    """
-    clarifications = []
-
-    for dotpath in _FUZZY_FIELDS:
-        value = _get_nested(spec, dotpath)
-        if value is None:
-            continue  # skip missing optional fields
-
-        str_value = str(value).strip()
-        if not str_value:
-            continue
-
-        if llm_fn is not None:
-            prompt = _build_clarification_prompt(dotpath, str_value, spec)
-            try:
-                response = llm_fn(prompt)
-                question = _extract_question(response)
-            except Exception:
-                question = _default_question(dotpath, str_value)
-        else:
-            question = _default_question(dotpath, str_value)
-
-        if question:
-            clarifications.append({
-                "field": dotpath,
-                "original": str_value,
-                "question": question,
-                "answer": "",
-            })
-
-    return clarifications
-
-
-def write_clarified_spec(
-    path: str | Path,
-    spec: dict,
-    clarifications: list[dict],
-) -> None:
-    """
-    Write spec.clarified.yaml with:
-    - Header comment block containing the original spec as a snapshot
-    - clarifications list with questions and empty answer slots
-    """
-    path = Path(path)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-    snapshot_comment = _dict_to_yaml_comment(spec)
-
-    clarifications_yaml = yaml.dump(
-        {"clarifications": clarifications},
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-
-    content = textwrap.dedent(f"""\
-        # ============================================================
-        # ORIGINAL SPEC SNAPSHOT（captured: {timestamp}）
-        # 此快照在 start.sh 時自動產生，原始 spec.yaml 不受影響。
-        # ============================================================
-        {snapshot_comment}
-        # ============================================================
-
-        {clarifications_yaml}""")
-
-    path.write_text(content, encoding="utf-8")
-
-
-def read_clarified_answers(path: str | Path) -> dict[str, str]:
-    """
-    Parse spec.clarified.yaml and return {field: answer} for all entries.
-    Strips comment lines before parsing.
-    """
-    path = Path(path)
-    if not path.exists():
-        return {}
-
-    raw = path.read_text(encoding="utf-8")
-    # Strip comment lines so PyYAML can parse the document cleanly
-    lines = [ln for ln in raw.splitlines() if not ln.startswith("#")]
-    cleaned = "\n".join(lines)
+    system_prompt = _load_prompt(role)
+    full_prompt = f"{system_prompt}\n\n---\n\n## Input spec.md\n\n{spec_md}"
 
     try:
-        data = yaml.safe_load(cleaned)
-    except yaml.YAMLError:
-        return {}
+        response = llm_fn(full_prompt)
+    except Exception as e:
+        logger.warning("run_spec_agent LLM call failed (%s): %s", role, e)
+        return SpecAgentResult(
+            needs_user_input=True,
+            questions=[f"LLM call failed: {e}"],
+            enhanced_spec_md=spec_md,
+            domain="unknown",
+            agent_notes=f"LLM error: {e}",
+        )
 
-    if not isinstance(data, dict):
-        return {}
-
-    result = {}
-    for item in data.get("clarifications") or []:
-        if isinstance(item, dict):
-            field = item.get("field", "")
-            answer = item.get("answer", "") or ""
-            result[field] = answer.strip()
-    return result
+    return _parse_agent_response(response, original_spec=spec_md)
 
 
-def all_answered(clarifications: list[dict]) -> bool:
-    """Return True if every clarification has a non-empty answer."""
-    return all(bool((c.get("answer") or "").strip()) for c in clarifications)
-
-
-def write_clarified_md(
-    path: str | Path,
-    spec: dict,
-    clarifications: list[dict],
-) -> None:
+def parse_spec_md(spec_md: str) -> dict:
     """
-    Write spec.clarified.md — a user-facing markdown Q&A file.
+    Extract structured fields from a completed spec.md.
 
-    Format:
-      - Header with snapshot timestamp
-      - One section per clarification with field, original value, question, answer slot
+    Returns a dict suitable for storing in projects.config["spec"] and
+    passing as ResearchState["spec"].
+
+    Parsed fields:
+      plugin, hypothesis, domain,
+      performance: {win_rate, max_drawdown, alpha_ratio, is_profit_factor, oos_profit_factor},
+      universe: {instruments, exchange, timeframe, train_start, train_end, test_start, test_end},
+      entry_signal, exit_signal, notes
     """
-    from datetime import datetime, timezone
-    path = Path(path)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    def _section(header: str) -> str:
+        pattern = rf"## {re.escape(header)}\s*\n(.*?)(?=\n## |\Z)"
+        m = re.search(pattern, spec_md, re.DOTALL | re.IGNORECASE)
+        return m.group(1).strip() if m else ""
 
-    project = spec.get("project", {})
-    research = spec.get("research", {})
+    def _float(text: str, patterns: list[str]) -> float | None:
+        for p in patterns:
+            m = re.search(p, text, re.IGNORECASE)
+            if m:
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    pass
+        return None
 
-    lines = [
-        f"# Spec Clarifications",
-        f"",
-        f"**Project**: {project.get('label', 'unknown')}  ",
-        f"**Generated**: {timestamp}",
-        f"",
-        f"> Fill in each **Answer** below, then run `./resume.sh`.",
-        f"",
-        f"---",
-        f"",
-    ]
+    # Plugin
+    plugin_section = _section("Plugin")
+    plugin_m = re.search(r"(\w+)", plugin_section)
+    plugin = plugin_m.group(1).strip() if plugin_m else "quant_alpha"
 
-    if not clarifications:
-        lines += [
-            "## No Clarifications Needed",
-            "",
-            "All fields are clear. Run `./resume.sh` to start the research loop.",
-            "",
-        ]
-    else:
-        for i, c in enumerate(clarifications, 1):
-            lines += [
-                f"## {i}. `{c['field']}`",
-                f"",
-                f"**Original value**  ",
-                f"```",
-                f"{c['original']}",
-                f"```",
-                f"",
-                f"**Question**  ",
-                f"{c['question']}",
-                f"",
-                f"**Answer**  ",
-                f"<!-- fill in below -->",
-                f"",
-                f"",
-                f"---",
-                f"",
-            ]
+    # Domain
+    domain = _section("Domain").strip().splitlines()[0] if _section("Domain") else "unknown"
 
-    # Append original spec as a collapsed reference
-    spec_yaml = yaml.dump(spec, allow_unicode=True, default_flow_style=False, sort_keys=False)
-    lines += [
-        "<details>",
-        "<summary>Original spec snapshot</summary>",
-        "",
-        "```yaml",
-        spec_yaml.rstrip(),
-        "```",
-        "</details>",
-        "",
-    ]
+    # Hypothesis
+    hypothesis = _section("Hypothesis") or _section("Research Goal")
 
-    path.write_text("\n".join(lines), encoding="utf-8")
+    # Performance thresholds
+    perf_text = _section("Performance Thresholds")
+    win_rate = _float(perf_text, [
+        r"win.?rate[:\s]+([0-9.]+)",
+        r"min.?win[:\s]+([0-9.]+)",
+    ])
+    max_drawdown = _float(perf_text, [
+        r"max.?drawdown[:\s]+([0-9.]+)",
+        r"drawdown[:\s]+([0-9.]+)",
+    ])
+    alpha_ratio = _float(perf_text, [
+        r"alpha.?ratio[:\s]+([0-9.]+)",
+        r"min.?alpha[:\s]+([0-9.]+)",
+    ])
+    is_pf = _float(perf_text, [
+        r"in.?sample.?profit.?factor[:\s]+([0-9.]+)",
+        r"min.{0,20}profit.?factor[:\s]+([0-9.]+)",
+    ])
+    oos_pf = _float(perf_text, [
+        r"out.?of.?sample.?profit.?factor[:\s]+([0-9.]+)",
+        r"oos.?profit.?factor[:\s]+([0-9.]+)",
+    ])
 
+    # Universe
+    universe_text = _section("Universe")
+    instruments = re.findall(r"Instruments?[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
+    exchange = re.findall(r"Exchange[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
+    timeframe = re.findall(r"Timeframe[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}", universe_text)
 
-def read_clarified_answers_md(path: str | Path) -> dict[str, str]:
-    """
-    Parse answers from spec.clarified.md.
+    # Signals
+    entry_signal = _section("Entry Signal")
+    exit_signal = _section("Exit Signal")
 
-    Looks for sections of the form:
-      ## N. `field.name`
-      ...
-      **Answer**
-      <!-- fill in below -->
-      <actual answer text>
-    """
-    import re
-    path = Path(path)
-    if not path.exists():
-        return {}
+    # Agent notes
+    agent_notes = _section("Agent Notes")
 
-    content = path.read_text(encoding="utf-8")
-    answers: dict[str, str] = {}
-
-    # Find each section
-    section_pattern = re.compile(
-        r"## \d+\.\s+`([^`]+)`.*?\*\*Answer\*\*\s*\n"
-        r"<!-- fill in below -->\s*\n"
-        r"(.*?)(?=\n---|\n## |\Z)",
-        re.DOTALL,
-    )
-    for m in section_pattern.finditer(content):
-        field = m.group(1).strip()
-        answer = m.group(2).strip()
-        answers[field] = answer
-
-    return answers
-
-
-def load_clarifications_md(path: str | Path) -> list[dict]:
-    """
-    Load clarifications from spec.clarified.md.
-    Returns list of {field, original, question, answer}.
-    """
-    import re
-    path = Path(path)
-    if not path.exists():
-        return []
-
-    content = path.read_text(encoding="utf-8")
-    clarifications = []
-
-    section_pattern = re.compile(
-        r"## \d+\.\s+`([^`]+)`\s*\n"
-        r".*?\*\*Original value\*\*\s*\n```\n(.*?)```\s*\n"
-        r".*?\*\*Question\*\*\s*\n(.*?)\n"
-        r".*?\*\*Answer\*\*\s*\n<!-- fill in below -->\s*\n"
-        r"(.*?)(?=\n---|\n## |\Z)",
-        re.DOTALL,
-    )
-    for m in section_pattern.finditer(content):
-        clarifications.append({
-            "field": m.group(1).strip(),
-            "original": m.group(2).strip(),
-            "question": m.group(3).strip(),
-            "answer": m.group(4).strip(),
-        })
-    return clarifications
-
-
-def load_clarifications(path: str | Path) -> list[dict]:
-    """Load the clarifications list from spec.clarified.yaml."""
-    path = Path(path)
-    if not path.exists():
-        return []
-
-    raw = path.read_text(encoding="utf-8")
-    lines = [ln for ln in raw.splitlines() if not ln.startswith("#")]
-    cleaned = "\n".join(lines)
-
-    try:
-        data = yaml.safe_load(cleaned)
-    except yaml.YAMLError:
-        return []
-
-    if not isinstance(data, dict):
-        return []
-    return data.get("clarifications") or []
+    return {
+        "plugin": plugin,
+        "domain": domain,
+        "hypothesis": hypothesis,
+        "performance": {
+            "win_rate": win_rate,
+            "max_drawdown": max_drawdown,
+            "alpha_ratio": alpha_ratio,
+            "is_profit_factor": is_pf,
+            "oos_profit_factor": oos_pf,
+        },
+        "universe": {
+            "instruments": instruments[0].strip() if instruments else "",
+            "exchange": exchange[0].strip() if exchange else "",
+            "timeframe": timeframe[0].strip() if timeframe else "",
+            "train_start": dates[0] if len(dates) > 0 else "",
+            "train_end": dates[1] if len(dates) > 1 else "",
+            "test_start": dates[2] if len(dates) > 2 else "",
+            "test_end": dates[3] if len(dates) > 3 else "",
+        },
+        "entry_signal": entry_signal,
+        "exit_signal": exit_signal,
+        "agent_notes": agent_notes,
+        "raw_md": spec_md,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_clarification_prompt(dotpath: str, value: str, spec: dict) -> str:
-    hypothesis = _get_nested(spec, "research.hypothesis") or ""
+def _load_prompt(role: str) -> str:
+    """Load system prompt from framework/prompts/ directory."""
+    prompt_file = Path(__file__).parent / "prompts" / f"spec_agent_{role}.txt"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8")
+    # Fallback inline prompt
+    logger.warning("Prompt file not found: %s — using inline fallback.", prompt_file)
     return (
-        f"You are reviewing a quantitative research spec.\n\n"
-        f"Field: {dotpath}\n"
-        f"Current value: {value!r}\n"
-        f"Research hypothesis: {hypothesis!r}\n\n"
-        "If this field is ambiguous or underspecified, generate ONE concise clarifying "
-        "question in Traditional Chinese (繁體中文). "
-        "If the field is already clear and unambiguous, respond with: CLEAR\n\n"
-        "Response format: just the question or 'CLEAR'."
+        "You are a research specification agent. "
+        "Rewrite the given spec.md to be complete and executable. "
+        "End your response with:\n"
+        "<!-- AGENT_META\n"
+        "needs_user_input: false\n"
+        "domain: <domain>\n"
+        "questions: []\n"
+        "agent_notes: <what you did>\n"
+        "-->"
     )
 
 
-def _extract_question(response: str) -> str:
-    """Return empty string if response is CLEAR, else return the question."""
-    stripped = response.strip()
-    if stripped.upper() == "CLEAR" or stripped.upper().startswith("CLEAR"):
-        return ""
-    return stripped
+def _parse_agent_response(response: str, original_spec: str) -> SpecAgentResult:
+    """
+    Parse LLM response:
+      1. Extract <!-- AGENT_META ... --> block for metadata.
+      2. Strip the block from the spec markdown.
+
+    If the block is missing or malformed, treat conservatively as needs_user_input=True.
+    """
+    meta_pattern = re.compile(
+        r"<!--\s*AGENT_META\s*(.*?)\s*-->",
+        re.DOTALL,
+    )
+    meta_match = meta_pattern.search(response)
+
+    if not meta_match:
+        logger.warning("AGENT_META block not found in LLM response — treating as needs_user_input.")
+        return SpecAgentResult(
+            needs_user_input=True,
+            questions=["Agent response did not include required AGENT_META block."],
+            enhanced_spec_md=response.strip() or original_spec,
+            domain="unknown",
+            agent_notes="Missing AGENT_META block.",
+        )
+
+    meta_text = meta_match.group(1)
+    spec_md = meta_pattern.sub("", response).strip()
+
+    # Parse metadata fields
+    needs_input = _parse_bool(meta_text, "needs_user_input", default=True)
+    domain = _parse_str(meta_text, "domain", default="unknown")
+    agent_notes = _parse_str(meta_text, "agent_notes", default="")
+    questions = _parse_list(meta_text, "questions")
+
+    return SpecAgentResult(
+        needs_user_input=needs_input,
+        questions=questions,
+        enhanced_spec_md=spec_md or original_spec,
+        domain=domain,
+        agent_notes=agent_notes,
+    )
 
 
-def _default_question(dotpath: str, value: str) -> str:
-    """Fallback rule-based questions when LLM is unavailable."""
-    defaults = {
-        "research.signals.entry": (
-            f"入場信號 {value!r} 的交叉確認方式？"
-            "（1）單根 K 棒收盤 （2）N 根連續收盤"
-        ),
-        "research.signals.exit": (
-            f"出場信號 {value!r} 的確認方式？同上還是不同？"
-        ),
-        "research.optimization.method": (
-            f"優化方式 {value!r} 的停止條件？"
-            "（1）固定迭代次數 （2）收斂閾值"
-        ),
-        "research.notes": "",  # notes are optional hints, no question needed
-    }
-    return defaults.get(dotpath, "")
+def _parse_bool(text: str, key: str, default: bool = False) -> bool:
+    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    if not m:
+        return default
+    return m.group(1).strip().lower() in ("true", "yes", "1")
+
+
+def _parse_str(text: str, key: str, default: str = "") -> str:
+    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    if not m:
+        return default
+    return m.group(1).strip()
+
+
+def _parse_list(text: str, key: str) -> list[str]:
+    """Parse a YAML-style list or inline [] from metadata block."""
+    # Inline empty: questions: []
+    inline_m = re.search(rf"^{re.escape(key)}:\s*\[\s*\]", text, re.MULTILINE | re.IGNORECASE)
+    if inline_m:
+        return []
+    # Multi-line list items:  - "item"
+    list_m = re.search(
+        rf"^{re.escape(key)}:\s*\n((?:\s+-\s+.+\n?)*)",
+        text, re.MULTILINE | re.IGNORECASE,
+    )
+    if list_m:
+        items = re.findall(r"^\s+-\s+[\"']?(.+?)[\"']?\s*$", list_m.group(1), re.MULTILINE)
+        return [i.strip() for i in items if i.strip()]
+    return []

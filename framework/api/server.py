@@ -9,41 +9,38 @@ Planka column state machine:
                 └── (replan)────────┘
 
 Endpoints:
-  POST /project/init    — create project stub + Planka card in Planning
-  POST /start           — parse spec, run LLM review, move to Verify or back to Planning
-  POST /resume          — resume paused graph (loop review decisions)
-  POST /planka-webhook  — Planka card-move events → resume actions
+  POST /planka-webhook  — Planka card-move events
   GET  /health
 
+Webhook routing:
+  Spec Pending Review → _run_spec_review_bg  (dual-LLM spec agent)
+  Verify / Done        → resume: action=continue
+  Failed               → resume: action=terminate
+
 Scheduler:
-  Every 60 s: scan "Spec Pending Review" column for cards with no checkpoint
-  (recovery in case /start background task never fired).
+  Every 60 s: clear review_in_progress flags older than 5 minutes (crash recovery).
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
+import time
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, BackgroundTasks
 from langgraph.types import Command
 
 from framework.db.queries import create_project, get_project, record_checkpoint_decision
 from framework.db.connection import run_migration
 from framework.plugin_registry import resolve as resolve_plugin
 from framework.graph import get_or_build_graph
-from framework.spec_clarifier import (
-    validate_spec,
-    generate_clarifications,
-    load_spec_md,
-    SpecValidationError,
-)
+from framework.spec_clarifier import run_spec_agent, parse_spec_md
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Agentic Research API", version="0.3.0")
+app = FastAPI(title="Agentic Research API", version="0.4.0")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 PLANKA_URL = os.getenv("PLANKA_API_URL", "")
@@ -69,9 +66,9 @@ _planka_sink = None
 def _get_graph(project_id: str):
     project = get_project(project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
+        raise ValueError(f"Project '{project_id}' not found.")
     plugin = resolve_plugin(project["plugin_name"])
-    config = {"db_url": DATABASE_URL, **project.get("config", {}), "planka_sink": _planka_sink}
+    config = {"db_url": DATABASE_URL, **(project.get("config") or {}), "planka_sink": _planka_sink}
     return get_or_build_graph(plugin, config)
 
 
@@ -83,7 +80,6 @@ def _has_checkpoint(graph, project_id: str) -> bool:
     """Return True only if the graph has an ACTIVE (interrupted) checkpoint."""
     try:
         state = graph.get_state(config=_thread_config(project_id))
-        # state.next is non-empty only when the graph is paused at an interrupt
         return bool(state and state.values and state.next)
     except Exception:
         return False
@@ -100,12 +96,10 @@ def _graph_terminated(graph, project_id: str) -> bool:
     return False
 
 
-def _build_initial_state(project: dict, answers: dict | None = None) -> dict:
-    spec = project.get("config", {}).get("spec") or {}
-    research = spec.get("research", {})
-    goal = research.get("hypothesis") or project.get("goal") or "research"
-
-    state = {
+def _build_initial_state(project: dict) -> dict:
+    spec = (project.get("config") or {}).get("spec") or {}
+    goal = spec.get("hypothesis") or project.get("goal") or "research"
+    return {
         "project_id": project["id"],
         "loop_index": 0,
         "loop_goal": goal,
@@ -121,10 +115,9 @@ def _build_initial_state(project: dict, answers: dict | None = None) -> dict:
         "artifacts": [],
     }
 
-    if answers:
-        state["last_checkpoint_decision"] = {"action": "answers", "answers": answers}
 
-    return state
+def _slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +147,6 @@ def _run_resume_bg(project_id: str, decision: dict) -> None:
         if action == "terminate":
             _move_planka_card(project_id, _COL_DONE)
         elif _graph_terminated(graph, project_id):
-            # Graph ended with TERMINATE (max attempts/loops) → back to Planning
             _move_planka_card(project_id, _COL_PLANNING)
         else:
             _move_planka_card(project_id, _COL_VERIFY)
@@ -173,17 +165,18 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
             logger.error("Cannot start: project '%s' not found.", project_id)
             return
         plugin = resolve_plugin(project["plugin_name"])
-        config = {"db_url": DATABASE_URL, **(project.get("config") or {}), "planka_sink": _planka_sink}
+        config = {
+            "db_url": DATABASE_URL,
+            **(project.get("config") or {}),
+            "planka_sink": _planka_sink,
+        }
         graph = get_or_build_graph(plugin, config)
-
-        # Ensure card is in Verify (idempotent move)
         _move_planka_card(project_id, _COL_VERIFY)
 
         graph.invoke(initial_state, config=_thread_config(project_id))
 
         if _graph_terminated(graph, project_id):
             _move_planka_card(project_id, _COL_PLANNING)
-            logger.info("Graph terminated for project '%s' — card → Planning.", project_id)
         else:
             logger.info("Graph completed for project '%s'.", project_id)
     except Exception as e:
@@ -191,221 +184,225 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
         _move_planka_card(project_id, _COL_FAILED)
 
 
+def _run_spec_review_bg(
+    project_id: str,
+    card_id: str,
+    card_name: str,
+    description: str,
+) -> None:
+    """
+    Dual-LLM spec-writing agent gate.
+    Called when a card is moved to Spec Pending Review.
+
+    Flow:
+      1. Idempotency check (review_in_progress flag).
+      2. Ensure thread_id in card description.
+      3. Check for .md attachment — reject without it.
+      4. Primary LLM: rewrite spec.md, upload new version.
+      5. Secondary LLM: consistency review, upload final version.
+      6. Both pass → read custom fields, parse spec, upsert project, move to Verify, start graph.
+      7. Any issue → comment + move to Planning.
+    """
+    # --- 1. Idempotency ---
+    existing = get_project(project_id, DATABASE_URL)
+    if existing and (existing.get("config") or {}).get("review_in_progress"):
+        logger.info(
+            "Spec review already in progress for '%s', skipping duplicate trigger.", project_id
+        )
+        return
+
+    try:
+        # --- 2. Ensure thread_id in card description ---
+        if not _extract_thread_id(description):
+            new_desc = f"thread_id: {project_id}\n\n{description}"
+            if _planka_sink:
+                _planka_sink.update_card_description(project_id, new_desc)
+
+        # --- 3. Upsert project stub + set review_in_progress ---
+        create_project(
+            project_id=project_id,
+            name=card_name,
+            plugin_name="unknown",
+            goal="",
+            config={
+                "review_in_progress": True,
+                "review_started_at": time.time(),
+            },
+            db_url=DATABASE_URL,
+        )
+        if _planka_sink:
+            _planka_sink.cache_card_id(project_id, card_id)
+
+        # --- 4. Check for .md attachment — required ---
+        spec_md = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
+        if not spec_md:
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    "**Missing spec.md**\n\n"
+                    "Please upload a `spec.md` file as a card attachment before moving to "
+                    "Spec Pending Review.\n\n"
+                    "Minimum content needed:\n"
+                    "- What you want to research\n"
+                    "- Your core hypothesis or idea\n"
+                    "- Any specific constraints (asset, timeframe, instrument, etc.)",
+                )
+            _clear_review_flag(project_id)
+            _move_planka_card(project_id, _COL_PLANNING)
+            return
+
+        llm_chain = _build_llm_chain()
+        primary_fn = llm_chain[0][1] if llm_chain else None
+        secondary_fn = llm_chain[1][1] if len(llm_chain) > 1 else primary_fn
+
+        # --- 5. Primary LLM: rewrite spec ---
+        result1 = run_spec_agent(spec_md, llm_fn=primary_fn, role="primary")
+        if _planka_sink:
+            _planka_sink.upload_spec_attachment(card_id, "spec.md", result1.enhanced_spec_md)
+
+        if result1.needs_user_input:
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    "**Spec Agent — Clarification Needed**\n\n"
+                    + "\n".join(f"- {q}" for q in result1.questions)
+                    + (f"\n\n_{result1.agent_notes}_" if result1.agent_notes else ""),
+                )
+            _clear_review_flag(project_id)
+            _move_planka_card(project_id, _COL_PLANNING)
+            return
+
+        # --- 6. Secondary LLM: consistency review ---
+        result2 = run_spec_agent(result1.enhanced_spec_md, llm_fn=secondary_fn, role="secondary")
+        if _planka_sink:
+            _planka_sink.upload_spec_attachment(card_id, "spec.md", result2.enhanced_spec_md)
+
+        if result2.needs_user_input:
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    "**Spec Agent (Secondary Review) — Issues Found**\n\n"
+                    + "\n".join(f"- {q}" for q in result2.questions)
+                    + (f"\n\n_{result2.agent_notes}_" if result2.agent_notes else ""),
+                )
+            _clear_review_flag(project_id)
+            _move_planka_card(project_id, _COL_PLANNING)
+            return
+
+        # --- 7. Both passed → read custom fields, parse, start ---
+        custom_fields = (
+            _planka_sink.read_card_custom_fields(card_id) if _planka_sink else {}
+        )
+        review_interval = int(custom_fields.get("review_interval") or 5)
+        max_loops = int(custom_fields.get("max_loops") or 30)
+
+        parsed = parse_spec_md(result2.enhanced_spec_md)
+        create_project(
+            project_id=project_id,
+            name=card_name,
+            plugin_name=parsed.get("plugin", "quant_alpha"),
+            goal=parsed.get("hypothesis", ""),
+            config={
+                "spec": parsed,
+                "review_interval": review_interval,
+                "max_loops": max_loops,
+                "review_in_progress": False,
+            },
+            db_url=DATABASE_URL,
+        )
+
+        if _planka_sink:
+            _planka_sink.post_comment(
+                project_id,
+                f"**Spec approved — research starting**\n"
+                f"Domain: {result2.domain} | Plugin: {parsed.get('plugin')} | "
+                f"Review every {review_interval} loops | Max {max_loops} loops",
+            )
+
+        _move_planka_card(project_id, _COL_VERIFY)
+        project = get_project(project_id)
+        _run_start_bg(project_id, _build_initial_state(project))
+
+    except Exception as e:
+        logger.exception("Spec review failed for '%s': %s", project_id, e)
+        _clear_review_flag(project_id)
+        if _planka_sink:
+            _planka_sink.post_comment(
+                project_id,
+                f"Spec review error: {e}\nCard moved to Failed.",
+            )
+        _move_planka_card(project_id, _COL_FAILED)
+
+
+def _clear_review_flag(project_id: str) -> None:
+    """Clear review_in_progress flag. Non-blocking."""
+    try:
+        from framework.db.connection import get_connection
+        with get_connection(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE projects SET config = config || %s::jsonb WHERE id = %s",
+                    (json.dumps({"review_in_progress": False}), project_id),
+                )
+    except Exception as e:
+        logger.debug("_clear_review_flag failed for '%s': %s", project_id, e)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
-class ProjectInitRequest(BaseModel):
-    project_id: str
-    project_name: str | None = None
-
-
-class ResumeRequest(BaseModel):
-    project_id: str
-    decision: dict
-
-
-class StartRequest(BaseModel):
-    spec_md: str | None = None
-    spec: dict | None = None
-
-
-@app.post("/project/init")
-async def project_init(body: ProjectInitRequest):
-    """
-    Initialize a project stub and create a Planka card in Planning.
-
-    Called by `agentic-research init` after creating the local directory.
-    No spec is required yet — user will write spec.md and then run ./start.sh.
-    """
-    project_id = body.project_id
-    project_name = body.project_name or body.project_id.replace("-", " ").title()
-
-    create_project(
-        project_id=project_id,
-        name=project_name,
-        plugin_name="dummy",
-        goal="",
-        config={},
-        db_url=DATABASE_URL,
-    )
-
-    _move_planka_card_to_column(project_id, project_name, _COL_PLANNING)
-
-    logger.info("Project '%s' initialised (Planning).", project_id)
-    return {"project_id": project_id, "status": "initialized"}
-
-
-@app.post("/start")
-async def start_project(body: StartRequest, background_tasks: BackgroundTasks):
-    """
-    Parse and validate spec, run LLM clarification review.
-
-    State transitions:
-      card → Spec Pending Review (immediately)
-      → Planning          (if clarifications needed — user must re-run after editing)
-      → Verify + graph    (if no clarifications — research loop starts)
-
-    Accepts spec_md (markdown string) or spec (pre-parsed dict).
-    """
-    llm_fn = _build_llm_fn()
-
-    if body.spec_md:
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
-            f.write(body.spec_md)
-            tmp = f.name
-        try:
-            spec = load_spec_md(tmp, llm_fn=llm_fn)
-        finally:
-            os.unlink(tmp)
-    elif body.spec:
-        spec = body.spec
-    else:
-        raise HTTPException(status_code=422, detail="Either spec_md or spec must be provided.")
-
-    try:
-        validate_spec(spec)
-    except SpecValidationError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    project_section = spec.get("project", {})
-    research_section = spec.get("research", {})
-
-    project_id = project_section.get("label", "unknown")
-    project_name = project_section.get("name", project_id)
-    plugin_name = research_section.get("plugin", "dummy")
-    goal = (research_section.get("hypothesis") or "").strip()
-    review_interval = research_section.get("review_interval", 5)
-    max_loops = research_section.get("max_loops", 30)
-
-    # Upsert project (updates if already created by /project/init)
-    create_project(
-        project_id=project_id,
-        name=project_name,
-        plugin_name=plugin_name,
-        goal=goal,
-        config={"spec": spec, "review_interval": review_interval, "max_loops": max_loops},
-        db_url=DATABASE_URL,
-    )
-
-    # Move card → Spec Pending Review
-    _move_planka_card_to_column(project_id, project_name, _COL_SPEC_PENDING)
-
-    # Upload spec content to card description
-    _upload_spec_to_planka(project_id, body.spec_md or "")
-
-    # LLM spec review
-    clarifications = generate_clarifications(spec, llm_fn=llm_fn)
-
-    if clarifications:
-        # Issues found: move card back to Planning for user to address
-        _move_planka_card(project_id, _COL_PLANNING)
-        logger.info(
-            "Project '%s': %d clarification(s) needed, card back to Planning.",
-            project_id, len(clarifications),
-        )
-        return {"project_id": project_id, "spec": spec, "clarifications": clarifications}
-
-    # No issues: start research loop
-    _move_planka_card(project_id, _COL_VERIFY)
-    project = get_project(project_id)
-    initial_state = _build_initial_state(project)
-    background_tasks.add_task(_run_start_bg, project_id, initial_state)
-    logger.info("Project '%s': spec clean, graph starting in Verify.", project_id)
-    return {
-        "project_id": project_id,
-        "spec": spec,
-        "clarifications": [],
-        "status": "started",
-    }
-
-
-@app.post("/resume")
-async def resume(body: ResumeRequest, background_tasks: BackgroundTasks):
-    """
-    Resume a paused LangGraph thread or start with confirmed clarification answers.
-
-    Routing:
-      Has checkpoint → resume in background (loop review decisions)
-      No checkpoint + confirmed=true → start graph in background (after user answered clarifications via ./resume.sh)
-      No checkpoint + not confirmed → 409 confirmation_required
-    """
-    project_id = body.project_id
-    decision = body.decision
-
-    project = get_project(project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
-
-    plugin = resolve_plugin(project["plugin_name"])
-    config = {"db_url": DATABASE_URL, **(project.get("config") or {}), "planka_sink": _planka_sink}
-    graph = get_or_build_graph(plugin, config)
-
-    if _has_checkpoint(graph, project_id):
-        background_tasks.add_task(_run_resume_bg, project_id, decision)
-        logger.info("Queued resume for project '%s'.", project_id)
-        return {"status": "resuming", "project_id": project_id}
-
-    # No checkpoint — must confirm before starting
-    if not decision.get("confirmed"):
-        raise HTTPException(
-            status_code=409,
-            detail={"status": "confirmation_required", "project_id": project_id},
-        )
-
-    answers = decision.get("answers") or {}
-    initial_state = _build_initial_state(project, answers)
-    background_tasks.add_task(_run_start_bg, project_id, initial_state)
-    logger.info("Queued start for project '%s' (answers confirmed).", project_id)
-    return {"status": "starting", "project_id": project_id}
-
-
 @app.post("/planka-webhook")
 async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
     """
-    Receive Planka card-move events and translate to resume actions.
+    Receive Planka card-move events.
 
-    Recognized destination columns:
-      Review → (no-op, just tracking)
-      Done / Verify  → action: continue
-      Failed         → action: terminate
-
-    The card description must contain:  thread_id: <project_id>
+    Routing by destination column:
+      Spec Pending Review → _run_spec_review_bg (dual-LLM spec agent)
+      Verify / Done       → resume: action=continue
+      Failed              → resume: action=terminate
     """
     payload = await request.json()
+    logger.info("Planka webhook raw payload: %s", payload)
 
     list_name = (payload.get("list") or {}).get("name", "")
+    card = payload.get("item") or {}
+    card_id = card.get("id", "")
+    description = card.get("description") or ""
+    card_name = card.get("name", "")
+
+    # Spec Pending Review: trigger dual-LLM agent
+    if list_name == _COL_SPEC_PENDING:
+        project_id = _extract_thread_id(description) or _slugify(card_name)
+        background_tasks.add_task(
+            _run_spec_review_bg, project_id, card_id, card_name, description
+        )
+        return {"status": "spec_review_queued", "project_id": project_id}
+
+    # Resume routing
     action_map = {
         _COL_VERIFY: "continue",
         _COL_DONE:   "continue",
         _COL_FAILED:  "terminate",
     }
-
     if list_name not in action_map:
         return {"status": "ignored", "list": list_name}
-
-    card = payload.get("item") or {}
-    card_id = card.get("id")
-    description = card.get("description", "")
 
     project_id = _extract_thread_id(description)
     if not project_id:
         logger.warning("Could not extract thread_id from card %s.", card_id)
         return {"status": "error", "detail": "thread_id not found in card description"}
 
-    action = action_map[list_name]
-    notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
-
-    decision = {"action": action, "notes": notes}
-
     project = get_project(project_id)
     if project is None:
         return {"status": "error", "detail": f"Project '{project_id}' not found."}
 
+    notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
+    decision = {"action": action_map[list_name], "notes": notes}
+
     background_tasks.add_task(_run_resume_bg, project_id, decision)
-    logger.info("Planka webhook: project=%s action=%s", project_id, action)
-    return {"status": "ok", "project_id": project_id, "action": action}
+    logger.info("Planka webhook: project=%s action=%s", project_id, action_map[list_name])
+    return {"status": "ok", "project_id": project_id, "action": action_map[list_name]}
 
 
 @app.get("/health")
@@ -414,66 +411,52 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# Scheduler — recovery scan for Spec Pending Review cards
+# Scheduler — crash recovery for stalled spec reviews
 # ---------------------------------------------------------------------------
 
 async def _scheduler_loop() -> None:
-    """
-    Every 60 s: scan "Spec Pending Review" for cards with no LangGraph checkpoint.
-    This is a recovery mechanism in case the server restarted mid-flow.
-    """
     while True:
         await asyncio.sleep(60)
         try:
-            await _scan_spec_pending_projects()
+            await _scan_stalled_reviews()
         except Exception as e:
             logger.warning("Scheduler scan error: %s", e)
 
 
-async def _scan_spec_pending_projects() -> None:
-    if not (PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID):
+async def _scan_stalled_reviews() -> None:
+    """
+    Clear review_in_progress flags that have been set for more than 5 minutes.
+    This handles the case where the server crashed mid-review.
+    """
+    if not DATABASE_URL:
         return
-
-    cards = _get_planka_column_cards(_COL_SPEC_PENDING)
-    for card in cards:
-        description = card.get("description", "")
-        project_id = _extract_thread_id(description)
-        if not project_id:
-            continue
-
-        project = get_project(project_id)
-        if not project:
-            continue
-
-        try:
-            plugin = resolve_plugin(project["plugin_name"])
-            config = {"db_url": DATABASE_URL, **(project.get("config") or {})}
-            graph = get_or_build_graph(plugin, config)
-
-            if not _has_checkpoint(graph, project_id):
-                spec = (project.get("config") or {}).get("spec")
-                if not spec:
-                    logger.warning(
-                        "Scheduler: project '%s' in Spec Pending Review has no spec in DB — skipping.",
+    try:
+        from framework.db.connection import get_connection
+        stale_cutoff = time.time() - 300  # 5 minutes
+        with get_connection(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, config FROM projects
+                    WHERE (config->>'review_in_progress')::boolean = true
+                    """
+                )
+                rows = cur.fetchall()
+        for project_id, config in rows:
+            started_at = (config or {}).get("review_started_at", 0)
+            if started_at < stale_cutoff:
+                logger.warning(
+                    "Clearing stalled review_in_progress for project '%s'.", project_id
+                )
+                _clear_review_flag(project_id)
+                if _planka_sink:
+                    _planka_sink.post_comment(
                         project_id,
+                        "Spec review timed out — please move the card back to Planning and try again.",
                     )
-                    continue
-
-                clarifications = generate_clarifications(spec, llm_fn=_build_llm_fn())
-                if clarifications:
-                    _move_planka_card(project_id, _COL_PLANNING)
-                    logger.info(
-                        "Scheduler: project '%s' has clarifications, moved to Planning.", project_id
-                    )
-                else:
-                    _move_planka_card(project_id, _COL_VERIFY)
-                    initial_state = _build_initial_state(project)
-                    asyncio.get_event_loop().run_in_executor(
-                        None, _run_start_bg, project_id, initial_state
-                    )
-                    logger.info("Scheduler: auto-started project '%s'.", project_id)
-        except Exception as e:
-            logger.warning("Scheduler could not process project '%s': %s", project_id, e)
+                _move_planka_card(project_id, _COL_PLANNING)
+    except Exception as e:
+        logger.warning("_scan_stalled_reviews error: %s", e)
 
 
 @app.on_event("startup")
@@ -484,7 +467,8 @@ async def startup_event():
     if PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID:
         from framework.planka import PlankaSink
         _planka_sink = PlankaSink(PLANKA_URL, PLANKA_TOKEN, PLANKA_BOARD_ID, DATABASE_URL)
-        logger.info("PlankaSink initialized.")
+        _planka_sink.ensure_custom_fields()
+        logger.info("PlankaSink initialized with custom fields.")
     asyncio.create_task(_scheduler_loop())
     logger.info("Scheduler started.")
 
@@ -508,14 +492,6 @@ def _run_migrations() -> None:
 # Planka helpers
 # ---------------------------------------------------------------------------
 
-def _upload_spec_to_planka(project_id: str, spec_md: str) -> None:
-    """Update the Planka card description with the full spec content."""
-    if not _planka_sink or not spec_md:
-        return
-    description = f"thread_id: {project_id}\n\n---\n\n{spec_md[:10_000]}"
-    _planka_sink.update_card_description(project_id, description)
-
-
 def _extract_thread_id(description: str) -> str | None:
     match = re.search(r"thread_id:\s*(\S+)", description)
     return match.group(1) if match else None
@@ -536,88 +512,6 @@ def _get_latest_card_comment(card_id: str) -> str:
     except Exception as e:
         logger.warning("Could not fetch Planka card comments: %s", e)
     return ""
-
-
-def _get_planka_column_cards(column_name: str) -> list[dict]:
-    if not (PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID):
-        return []
-    try:
-        resp = httpx.get(
-            f"{PLANKA_URL}/api/boards/{PLANKA_BOARD_ID}",
-            headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        lists = data.get("included", {}).get("lists") or []
-        cards = data.get("included", {}).get("cards") or []
-        for lst in lists:
-            if lst.get("name") == column_name:
-                return [c for c in cards if c.get("listId") == lst["id"]]
-    except Exception as e:
-        logger.warning("Could not fetch Planka column '%s': %s", column_name, e)
-    return []
-
-
-def _move_planka_card_to_column(project_id: str, project_name: str, column_name: str) -> None:
-    """Create card in column if it doesn't exist; move it there if it does."""
-    if not (PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID):
-        return
-    try:
-        resp = httpx.get(
-            f"{PLANKA_URL}/api/boards/{PLANKA_BOARD_ID}",
-            headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        lists = data.get("included", {}).get("lists") or []
-        cards = data.get("included", {}).get("cards") or []
-
-        target_list_id = None
-        existing_card_id = None
-
-        for lst in lists:
-            if lst.get("name") == column_name:
-                target_list_id = lst.get("id")
-        for card in cards:
-            if _extract_thread_id(card.get("description", "")) == project_id:
-                existing_card_id = card.get("id")
-
-        if not target_list_id:
-            logger.warning("Planka column '%s' not found on board %s.", column_name, PLANKA_BOARD_ID)
-            return
-
-        if existing_card_id:
-            if _planka_sink:
-                _planka_sink.cache_card_id(project_id, existing_card_id)
-            httpx.patch(
-                f"{PLANKA_URL}/api/cards/{existing_card_id}",
-                headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-                json={"listId": target_list_id, "position": 65535},
-                timeout=10,
-            )
-        else:
-            r = httpx.post(
-                f"{PLANKA_URL}/api/lists/{target_list_id}/cards",
-                headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-                json={
-                    "name": project_name,
-                    "description": f"thread_id: {project_id}",
-                    "type": "project",
-                    "position": 65535,
-                },
-                timeout=10,
-            )
-            try:
-                new_card_id = r.json().get("item", {}).get("id")
-                if new_card_id and _planka_sink:
-                    _planka_sink.cache_card_id(project_id, new_card_id)
-            except Exception:
-                pass
-        logger.info("Planka card for project '%s' placed in '%s'.", project_id, column_name)
-    except Exception as e:
-        logger.warning("Planka card operation failed for project '%s': %s", project_id, e)
 
 
 def _move_planka_card(project_id: str, column_name: str) -> None:
@@ -642,7 +536,7 @@ def _move_planka_card(project_id: str, column_name: str) -> None:
             if lst.get("name") == column_name:
                 target_list_id = lst.get("id")
         for card in cards:
-            if _extract_thread_id(card.get("description", "")) == project_id:
+            if _extract_thread_id(card.get("description") or "") == project_id:
                 card_id = card.get("id")
 
         if card_id and target_list_id:
@@ -664,14 +558,7 @@ def _move_planka_card(project_id: str, column_name: str) -> None:
 
 
 def _ensure_planka_columns() -> None:
-    """
-    Idempotently create missing Planka columns on startup.
-
-    Required columns (in order):
-      Planning | Spec Pending Review | Verify | Review | Done | Failed
-
-    Safe to call repeatedly — only creates columns that are absent.
-    """
+    """Idempotently create missing Planka columns on startup."""
     if not (PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID):
         logger.info("Planka not configured — skipping column setup.")
         return
@@ -709,22 +596,21 @@ def _ensure_planka_columns() -> None:
                     logger.info("Created Planka column '%s'.", name)
                 else:
                     logger.warning("Failed to create Planka column '%s': %s", name, r.text[:100])
-            else:
-                logger.debug("Planka column '%s' already exists.", name)
     except Exception as e:
         logger.warning("Could not ensure Planka columns: %s", e)
 
 
-def _build_llm_fn():
-    llm_chain = os.getenv("LLM_CHAIN", "")
-    providers = [p.strip() for p in llm_chain.split(",") if p.strip()]
-    for provider in providers:
+def _build_llm_chain() -> list[tuple[str, callable]]:
+    """Build ordered list of (provider_name, llm_fn) from LLM_CHAIN env var."""
+    chain = []
+    for provider in (os.getenv("LLM_CHAIN", "") or "").split(","):
+        provider = provider.strip()
+        if not provider:
+            continue
         fn = _try_provider(provider)
         if fn is not None:
-            logger.info("LLM provider selected: %s", provider)
-            return fn
-    logger.warning("No LLM provider available; using rule-based clarification fallback.")
-    return None
+            chain.append((provider, fn))
+    return chain
 
 
 def _try_provider(provider: str):
@@ -737,8 +623,8 @@ def _try_provider(provider: str):
             client = anthropic.Anthropic(api_key=api_key)
             def _claude(prompt: str) -> str:
                 msg = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=256,
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return msg.content[0].text
@@ -748,9 +634,9 @@ def _try_provider(provider: str):
             client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             def _openai(prompt: str) -> str:
                 resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4o",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=256,
+                    max_tokens=4096,
                 )
                 return resp.choices[0].message.content
             return _openai
@@ -771,7 +657,7 @@ def _try_provider(provider: str):
                 r = httpx.post(
                     f"{endpoint}/api/generate",
                     json={"model": model_name, "prompt": prompt, "stream": False},
-                    timeout=60,
+                    timeout=120,
                 )
                 r.raise_for_status()
                 return r.json().get("response", "")

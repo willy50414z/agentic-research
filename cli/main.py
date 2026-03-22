@@ -1,567 +1,526 @@
 """
 cli/main.py
 
-CLI entry point for the Agentic Research Workflow (runs inside Docker container).
+Entry point for the `agentic-research` command.
 
-Commands:
-    start   — Phase 1: read /workspace/spec.yaml, register project, generate spec.clarified.yaml
-    resume  — Phase 1/2: check pending questions or post answers to framework-api
-    run     — (internal) Start graph directly with explicit --project/--plugin/--goal flags
-    status  — Show the current state of a running / paused project
-    approve — Resume a paused graph with a human decision
-    plugins — List all registered plugins
-
-Usage examples (from start.sh / resume.sh):
-    python cli/main.py start
-    python cli/main.py resume
-
-Internal / debug usage:
-    python cli/main.py run --project quant_alpha --plugin dummy --goal "find alpha"
-    python cli/main.py status --project quant_alpha
-    python cli/main.py approve --project quant_alpha --action continue
+Usage:
+    agentic-research init                — copy deployment files and configure LLM credentials
+    agentic-research init-planka-board   — create Planka project/board/lists and write token to .env
 """
 
-import json
-import os
+import shutil
 import sys
-import logging
+from importlib.resources import as_file, files
 from pathlib import Path
 
-# Ensure /app (repo root inside container) is on the path regardless of cwd
-_app_root = str(Path(__file__).parent.parent)
-if _app_root not in sys.path:
-    sys.path.insert(0, _app_root)
-
-import httpx
-import typer
-import yaml
-from dotenv import load_dotenv
-
-# Load .env from the app root (works whether running inside or outside Docker)
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-
-# Auto-discover and register all plugins under projects/*/plugin.py
-from framework.plugin_registry import discover_plugins as _discover_plugins
-_discover_plugins()
-
-from framework.db.queries import create_project, get_project, get_loop_metrics, record_checkpoint_decision
-from framework.graph import get_or_build_graph
-from framework.plugin_registry import resolve as resolve_plugin, list_plugins
-from framework.spec_clarifier import (
-    load_spec,
-    validate_spec,
-    generate_clarifications,
-    write_clarified_spec,
-    read_clarified_answers,
-    load_clarifications,
-    all_answered,
-    SpecValidationError,
-)
-from langgraph.types import Command
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("cli")
-
-app = typer.Typer(add_completion=False, help="Agentic Research Workflow CLI")
-
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-FRAMEWORK_API_URL = os.getenv("FRAMEWORK_API_URL", "http://framework-api:8000")
-
-# Workspace paths (volume-mounted at /workspace when running in Docker)
-_WORKSPACE = Path(os.getenv("WORKSPACE_DIR", "/workspace"))
-_SPEC_YAML = _WORKSPACE / "spec.yaml"
-_SPEC_CLARIFIED = _WORKSPACE / "spec.clarified.yaml"
+# Known CLI credential file locations (on the host machine)
+_CLAUDE_CRED  = Path.home() / ".claude"
+_GEMINI_CRED  = Path.home() / ".gemini"
+_CODEX_CRED   = Path.home() / ".codex"
 
 
 # ---------------------------------------------------------------------------
-# start — Phase 1: read spec.yaml, register, generate spec.clarified.yaml
+# Interactive helpers
 # ---------------------------------------------------------------------------
 
-@app.command()
-def start():
-    """
-    Phase 1: read /workspace/spec.yaml, register project in DB, create Planka card,
-    validate spec, run LLM clarification, and write spec.clarified.yaml.
+def _ask_yn(prompt: str, default: bool = False) -> bool:
+    hint = "Y/n" if default else "y/N"
+    while True:
+        raw = input(f"  {prompt} [{hint}]: ").strip().lower()
+        if raw == "":
+            return default
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
 
-    Invoked by ./start.sh (short-lived container, exits after writing clarified spec).
-    """
-    if not DATABASE_URL:
-        typer.echo("[ERROR] DATABASE_URL is not set.", err=True)
-        raise typer.Exit(1)
 
-    _maybe_run_migration()
+def _ask_str(prompt: str, default: str = "") -> str:
+    display = f"  {prompt} [{default}]: " if default else f"  {prompt}: "
+    raw = input(display).strip()
+    return raw if raw else default
 
-    # 1. Load spec
-    typer.echo(f"[START] Reading spec from {_SPEC_YAML}")
-    try:
-        spec = load_spec(_SPEC_YAML)
-    except FileNotFoundError as e:
-        typer.echo(f"[ERROR] {e}", err=True)
-        raise typer.Exit(1)
 
-    # 2. Rule-based validation
-    typer.echo("[START] Validating required fields...")
-    try:
-        validate_spec(spec)
-    except SpecValidationError as e:
-        typer.echo(f"[ERROR] Spec validation failed:\n{e}", err=True)
-        raise typer.Exit(1)
-    typer.echo("        ✓ Required fields OK")
+def _mask(key: str) -> str:
+    """Show only first 8 chars of a key for confirmation."""
+    return key[:8] + "..." if len(key) > 8 else key
 
-    # 3. Register project in DB
-    project_id = spec.get("project", {}).get("label", "unknown")
-    project_name = spec.get("project", {}).get("name", project_id)
-    plugin_name = spec.get("research", {}).get("plugin", "dummy")
-    goal = (spec.get("research", {}).get("hypothesis") or "").strip()
-    review_interval = spec.get("research", {}).get("review_interval", 5)
-    max_loops = spec.get("research", {}).get("max_loops", 30)
 
-    create_project(
-        project_id=project_id,
-        name=project_name,
-        plugin_name=plugin_name,
-        goal=goal,
-        config={
-            "spec": spec,
-            "review_interval": review_interval,
-            "max_loops": max_loops,
-        },
-    )
-    typer.echo(f"        ✓ Project '{project_id}' registered in DB")
+# ---------------------------------------------------------------------------
+# Per-provider configuration
+# ---------------------------------------------------------------------------
 
-    # 4. Create Planka card in "Clarifying" column
-    _create_planka_card(project_id, project_name)
+def _configure_claude() -> tuple[list[str], dict[str, str]]:
+    """Returns (chain_entries, env_updates)."""
+    print()
+    print("  Claude (Anthropic)")
 
-    # 5. LLM semantic analysis — generate clarification questions
-    typer.echo("[START] Running LLM semantic analysis...")
-    llm_fn = _get_llm_fn()
-    clarifications = generate_clarifications(spec, llm_fn=llm_fn)
+    if _CLAUDE_CRED.exists():
+        print(f"    ✓ Found credentials at {_CLAUDE_CRED}")
+        print("      Will use claude-cli mode.")
+        print("      Tip: mount ~/.claude into the container to share credentials.")
+        return ["claude-cli"], {}
 
-    # 6. Write spec.clarified.yaml
-    write_clarified_spec(_SPEC_CLARIFIED, spec, clarifications)
-    typer.echo(f"        ✓ Written: {_SPEC_CLARIFIED}")
+    print("    No local CLI credentials found.")
+    mode = None
+    while mode not in ("cli", "api", ""):
+        mode = input("    Mode — (c)li / (a)pi / skip [skip]: ").strip().lower()
+        if mode in ("c", "cli"):
+            mode = "cli"
+        elif mode in ("a", "api"):
+            mode = "api"
+        elif mode == "":
+            mode = ""
+        else:
+            mode = None
 
-    if not clarifications:
-        typer.echo("\n[START] No clarifications needed. Run ./resume.sh to start research.")
+    if mode == "cli":
+        print("    Will use claude-cli. After starting containers, run:")
+        print("      docker exec -it agentic-framework-api claude auth login")
+        return ["claude-cli"], {}
+
+    if mode == "api":
+        key = _ask_str("    Anthropic API key")
+        if key:
+            print(f"    ✓ Key set ({_mask(key)})")
+            return ["claude-api"], {"ANTHROPIC_API_KEY": key}
+        print("    Skipped (you can set ANTHROPIC_API_KEY in .env later).")
+
+    return [], {}
+
+
+def _configure_gemini() -> tuple[list[str], dict[str, str]]:
+    print()
+    print("  Gemini (Google)")
+
+    if _GEMINI_CRED.exists():
+        print(f"    ✓ Found credentials at {_GEMINI_CRED}")
+        print("      Will use gemini-cli mode.")
+        return ["gemini-cli"], {}
+
+    print("    No local CLI credentials found.")
+    mode = None
+    while mode not in ("cli", "api", ""):
+        mode = input("    Mode — (c)li / (a)pi / skip [skip]: ").strip().lower()
+        if mode in ("c", "cli"):
+            mode = "cli"
+        elif mode in ("a", "api"):
+            mode = "api"
+        elif mode == "":
+            mode = ""
+        else:
+            mode = None
+
+    if mode == "cli":
+        print("    Will use gemini-cli. After starting containers, run:")
+        print("      docker exec -it agentic-framework-api gemini auth login")
+        return ["gemini-cli"], {}
+
+    if mode == "api":
+        key = _ask_str("    Gemini API key")
+        if key:
+            print(f"    ✓ Key set ({_mask(key)})")
+            return ["gemini-api"], {"GEMINI_API_KEY": key}
+        print("    Skipped (you can set GEMINI_API_KEY in .env later).")
+
+    return [], {}
+
+
+def _configure_openai() -> tuple[list[str], dict[str, str]]:
+    """OpenAI API + Codex CLI share the same OPENAI_API_KEY."""
+    print()
+    print("  OpenAI / Codex")
+
+    if _CODEX_CRED.exists():
+        print(f"    ✓ Found Codex credentials at {_CODEX_CRED}")
+        print("      Will use codex-cli mode.")
+        return ["codex-cli"], {}
+
+    print("    No local Codex credentials found.")
+    mode = None
+    while mode not in ("cli", "api", ""):
+        mode = input("    Mode — (c)odex cli / (a)pi key / skip [skip]: ").strip().lower()
+        if mode in ("c", "cli"):
+            mode = "cli"
+        elif mode in ("a", "api"):
+            mode = "api"
+        elif mode == "":
+            mode = ""
+        else:
+            mode = None
+
+    if mode == "cli":
+        print("    Will use codex-cli. After starting containers, run:")
+        print("      docker exec -it agentic-framework-api codex login")
+        return ["codex-cli"], {}
+
+    if mode == "api":
+        key = _ask_str("    OpenAI API key")
+        if key:
+            print(f"    ✓ Key set ({_mask(key)})")
+            return ["openai-api"], {"OPENAI_API_KEY": key}
+        print("    Skipped (you can set OPENAI_API_KEY in .env later).")
+
+    return [], {}
+
+
+def _configure_local() -> tuple[list[str], dict[str, str]]:
+    print()
+    print("  Local LLM (Ollama)")
+    endpoint = _ask_str("    Ollama endpoint", default="http://host.docker.internal:11434")
+    model    = _ask_str("    Model name", default="llama3.2")
+    return ["local"], {"LOCAL_LLM_ENDPOINT": endpoint, "LOCAL_LLM_MODEL": model}
+
+
+# ---------------------------------------------------------------------------
+# LLM configuration orchestrator
+# ---------------------------------------------------------------------------
+
+def _configure_llm() -> dict[str, str]:
+    """Walk through each provider and return env var overrides."""
+    print()
+    print("─── LLM Configuration ───────────────────────────────────────────────")
+    print("  Configure which LLM providers to use.")
+    print("  For CLI mode, credentials must be present in (or mounted into) the container.")
+    print()
+
+    chain: list[str] = []
+    env_updates: dict[str, str] = {}
+
+    providers = [
+        ("Claude (Anthropic)",   _configure_claude),
+        ("Gemini (Google)",      _configure_gemini),
+        ("OpenAI / Codex",       _configure_openai),
+        ("Local LLM (Ollama)",   _configure_local),
+    ]
+
+    for label, configure_fn in providers:
+        if _ask_yn(f"Use {label}?", default=label.startswith("Claude")):
+            entries, updates = configure_fn()
+            chain.extend(entries)
+            env_updates.update(updates)
+
+    print()
+    if chain:
+        env_updates["LLM_CHAIN"] = ",".join(chain)
+        print(f"  LLM_CHAIN = {env_updates['LLM_CHAIN']}")
     else:
-        typer.echo(f"\n[START] {len(clarifications)} question(s) generated.")
-        typer.echo("        Edit spec.clarified.yaml to fill in answers, then run ./resume.sh")
-        for c in clarifications:
-            typer.echo(f"\n  Field   : {c['field']}")
-            typer.echo(f"  Question: {c['question']}")
+        env_updates["LLM_CHAIN"] = ""
+        print("  Warning: no LLM configured — edit LLM_CHAIN in .env before starting.")
+
+    return env_updates
 
 
 # ---------------------------------------------------------------------------
-# resume — check state and advance Phase 1 or Phase 2
+# .env patching
 # ---------------------------------------------------------------------------
 
-@app.command()
-def resume():
-    """
-    Advance the workflow:
-      - If unanswered clarifications exist → print them and exit
-      - If all answered → POST answers to framework-api /resume to start Phase 2
+def _patch_env(content: str, updates: dict[str, str]) -> str:
+    """Replace KEY=value lines in .env content. Preserves comments and order."""
+    lines = content.splitlines(keepends=True)
+    patched: set[str] = set()
+    result = []
 
-    Invoked by ./resume.sh (short-lived container).
-    """
-    if not _SPEC_CLARIFIED.exists():
-        typer.echo("[ERROR] spec.clarified.yaml not found. Run ./start.sh first.", err=True)
-        raise typer.Exit(1)
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            result.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            result.append(f"{key}={updates[key]}\n")
+            patched.add(key)
+        else:
+            result.append(line)
 
-    # Load spec to get project_id
-    try:
-        spec = load_spec(_SPEC_YAML)
-    except FileNotFoundError:
-        typer.echo("[ERROR] spec.yaml not found.", err=True)
-        raise typer.Exit(1)
+    # Append any keys not already present in the template
+    for key, val in updates.items():
+        if key not in patched:
+            result.append(f"{key}={val}\n")
 
-    project_id = spec.get("project", {}).get("label", "unknown")
+    return "".join(result)
 
-    # Step A: check for pending questions
-    clarifications = load_clarifications(_SPEC_CLARIFIED)
 
-    if clarifications and not all_answered(clarifications):
-        typer.echo(f"\n[RESUME] Project '{project_id}' has unanswered clarifications:\n")
-        for c in clarifications:
-            answer = (c.get("answer") or "").strip()
-            status = "✓" if answer else "✗"
-            typer.echo(f"  [{status}] {c['field']}")
-            typer.echo(f"       Q: {c['question']}")
-            if answer:
-                typer.echo(f"       A: {answer}")
-        typer.echo(
-            "\nEdit spec.clarified.yaml to fill in the remaining answers, "
-            "then run ./resume.sh again."
-        )
-        raise typer.Exit(0)
+# ---------------------------------------------------------------------------
+# Init command
+# ---------------------------------------------------------------------------
 
-    # Step B: all answered (or no questions) → post to framework-api
-    answers = read_clarified_answers(_SPEC_CLARIFIED)
+def _init(dest: Path) -> None:
+    deploy_pkg = files("deploy")
+    static_files = ["docker-compose.yml", "schema.sql"]
+    copied: list[str] = []
+    skipped: list[str] = []
 
-    typer.echo(f"\n[RESUME] All clarifications answered. Posting to framework-api...")
+    # Copy static files
+    for fname in static_files:
+        dst = dest / fname
+        if dst.exists():
+            skipped.append(fname)
+        else:
+            with as_file(deploy_pkg.joinpath(fname)) as src:
+                shutil.copy2(src, dst)
+            copied.append(fname)
 
-    payload = {
-        "project_id": project_id,
-        "decision": {
-            "action": "answers",
-            "answers": answers,
-            "confirmed": True,
-        },
-    }
+    # .env: interactive LLM config if new, skip if already exists
+    env_dst = dest / ".env"
+    if env_dst.exists():
+        skipped.append(".env")
+    else:
+        env_updates = _configure_llm()
+        raw = deploy_pkg.joinpath(".env").read_text(encoding="utf-8")
+        env_dst.write_text(_patch_env(raw, env_updates), encoding="utf-8")
+        copied.append(".env")
 
-    try:
+    # Summary
+    print()
+    print("─── Files ───────────────────────────────────────────────────────────")
+    all_files = static_files + [".env"]
+    width = max(len(f) for f in all_files)
+    for f in copied:
+        print(f"  created  {f:<{width}}  →  {dest / f}")
+    for f in skipped:
+        print(f"  skipped  {f:<{width}}  (already exists)")
+
+    if not copied:
+        print("\n  Nothing was changed.")
+        return
+
+    print("""
+─── Next steps ───────────────────────────────────────────────────────────
+  1. Edit .env
+       - VOLUME_BASE_DIR   path where Docker volume data will be stored
+       - SECRET_KEY        openssl rand -hex 32
+
+  2. Start services
+       docker compose up -d
+
+  3. Run database migration
+       docker exec -i agentic-research-postgres psql \\
+         -U agentic-postgres-user -d agentic-research < schema.sql
+
+  4. Open Planka  →  http://localhost:7002
+       Log in with DEFAULT_ADMIN_EMAIL / DEFAULT_ADMIN_PASSWORD from .env
+       Accept the Terms of Service (first login only)
+
+  5. Create board and write token to .env
+       agentic-research init-planka-board
+
+  6. Restart engine to apply Planka settings
+       docker compose restart agentic-framework-api
+""")
+
+
+# ---------------------------------------------------------------------------
+# Planka board initialisation
+# ---------------------------------------------------------------------------
+
+_PLANKA_LISTS = [
+    ("Planning",           10000),
+    ("Spec Pending Review", 20000),
+    ("Verify",             25000),
+    ("Review",             30000),
+    ("Done",               40000),
+    ("Failed",             50000),
+]
+
+_PLANKA_CUSTOM_FIELDS = [
+    ("review_interval", "number"),
+    ("max_loops",       "number"),
+]
+
+
+def _load_dotenv(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines from a .env file, skipping comments and blanks."""
+    env: dict[str, str] = {}
+    if not path.exists():
+        return env
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        env[key.strip()] = val.strip()
+    return env
+
+
+def _planka_login(base_url: str, email: str, password: str) -> str:
+    """Login to Planka and return a bearer token. Handles terms-acceptance step."""
+    import httpx
+
+    resp = httpx.post(
+        f"{base_url}/api/access-tokens",
+        json={"emailOrUsername": email, "password": password},
+        timeout=10,
+    )
+    data = resp.json()
+
+    # First-time login requires accepting terms of service in the browser.
+    if data.get("step") == "accept-terms":
+        print()
+        print("  Planka requires you to accept the Terms of Service before the API can be used.")
+        print(f"  Open {base_url} in your browser, log in, accept the terms, then come back.")
+        input("  Press Enter once you have accepted the terms...")
         resp = httpx.post(
-            f"{FRAMEWORK_API_URL}/resume",
-            json=payload,
-            timeout=30,
-        )
-        if resp.status_code == 409:
-            detail = resp.json()
-            typer.echo(f"[RESUME] Server confirmation required: {detail}")
-            # Re-post with confirmed=true (already set above; server may need explicit flag)
-            raise typer.Exit(0)
-        resp.raise_for_status()
-        data = resp.json()
-        typer.echo(f"[RESUME] {data.get('status', 'ok')} — framework-api accepted request.")
-        typer.echo("         Research loop starting in background. Check Planka for status.")
-    except httpx.HTTPError as e:
-        typer.echo(f"[ERROR] Could not reach framework-api: {e}", err=True)
-        typer.echo("        Make sure the infra stack is running (./start.sh starts it).")
-        raise typer.Exit(1)
-
-
-# ---------------------------------------------------------------------------
-# run — internal: start graph with explicit flags (debug / CI use)
-# ---------------------------------------------------------------------------
-
-@app.command()
-def run(
-    project: str = typer.Option(..., "--project", "-p", help="Project ID."),
-    plugin: str = typer.Option("dummy", "--plugin", help="Plugin name."),
-    goal: str = typer.Option("default research goal", "--goal", "-g", help="Research goal."),
-    review_interval: int = typer.Option(0, "--review-interval", help="Override review interval. 0 = plugin default."),
-):
-    """Start a research project directly (bypasses spec.yaml flow). For debug/CI use."""
-    if not DATABASE_URL:
-        typer.echo("[ERROR] DATABASE_URL is not set.", err=True)
-        raise typer.Exit(1)
-
-    _maybe_run_migration()
-    create_project(project_id=project, name=project, plugin_name=plugin, goal=goal)
-
-    plugin_instance = resolve_plugin(plugin)
-    cfg = {"db_url": DATABASE_URL}
-    if review_interval > 0:
-        cfg["review_interval"] = review_interval
-
-    graph = get_or_build_graph(plugin_instance, cfg)
-
-    initial_state = {
-        "project_id": project,
-        "loop_index": 0,
-        "loop_goal": goal,
-        "spec": None,
-        "implementation_plan": None,
-        "last_result": "UNKNOWN",
-        "last_reason": "",
-        "loop_count_since_review": 0,
-        "last_checkpoint_decision": None,
-        "needs_human_approval": False,
-        "attempt_count": 0,
-        "test_metrics": {},
-        "artifacts": [],
-    }
-
-    typer.echo(f"\n[RUN] Project '{project}' | Plugin '{plugin}'")
-    typer.echo(f"      Goal: {goal}\n")
-
-    graph.invoke(initial_state, config=_thread_config(project))
-    _print_graph_state(project, graph)
-
-
-# ---------------------------------------------------------------------------
-# status
-# ---------------------------------------------------------------------------
-
-@app.command()
-def status(
-    project: str = typer.Option(..., "--project", "-p", help="Project ID."),
-):
-    """Show current state and pending interrupt for a project."""
-    graph = _get_graph(project)
-    _print_graph_state(project, graph)
-
-    metrics = get_loop_metrics(project)
-    if metrics:
-        typer.echo("\n--- Loop History ---")
-        for m in metrics:
-            typer.echo(
-                f"  Loop {m['loop_index']:>2}: {m['result']:<5}  "
-                f"win_rate={m['win_rate'] or '-':>6}  "
-                f"alpha={m['alpha_ratio'] or '-':>6}  "
-                f"reason: {(m['reason'] or '')[:60]}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# approve
-# ---------------------------------------------------------------------------
-
-@app.command()
-def approve(
-    project: str = typer.Option(..., "--project", "-p", help="Project ID."),
-    action: str = typer.Option(..., "--action", "-a",
-        help="Decision: approve | reject | continue | replan | terminate"),
-    notes: str = typer.Option("", "--notes", "-n", help="Optional notes (for replan)."),
-    reason: str = typer.Option("", "--reason", "-r", help="Rejection reason (for reject)."),
-):
-    """
-    Resume a paused graph with a human decision.
-
-    For plan-review (implement node interrupt):
-        --action approve
-        --action reject --reason "plan is incomplete"
-
-    For loop-review (notify_planka interrupt):
-        --action continue
-        --action replan --notes "use ATR filter instead of RSI"
-        --action terminate
-    """
-    graph = _get_graph(project)
-    state = graph.get_state(config=_thread_config(project))
-
-    if not state.next:
-        typer.echo(f"[INFO] Project '{project}' has no pending interrupt. Nothing to resume.")
-        raise typer.Exit(0)
-
-    decision: dict = {"action": action}
-    if notes:
-        decision["notes"] = notes
-    if reason:
-        decision["reason"] = reason
-
-    typer.echo(f"\n[APPROVE] Project '{project}' | Action '{action}'")
-    if notes:
-        typer.echo(f"          Notes: {notes}")
-
-    loop_index = state.values.get("loop_index", 0)
-    graph.invoke(Command(resume=decision), config=_thread_config(project))
-
-    record_checkpoint_decision(
-        project_id=project,
-        loop_index=loop_index,
-        action=action,
-        notes=notes or None,
-        modified_plan={"reason": reason} if reason else None,
-    )
-
-    _print_graph_state(project, graph)
-
-
-# ---------------------------------------------------------------------------
-# plugins
-# ---------------------------------------------------------------------------
-
-@app.command()
-def plugins():
-    """List all registered plugins."""
-    names = list_plugins()
-    if names:
-        typer.echo("Registered plugins:")
-        for n in names:
-            typer.echo(f"  - {n}")
-    else:
-        typer.echo("No plugins registered.")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _get_graph(project_id: str):
-    project = get_project(project_id)
-    if not project:
-        typer.echo(f"[ERROR] Project '{project_id}' not found in database.", err=True)
-        raise typer.Exit(1)
-    plugin = resolve_plugin(project["plugin_name"])
-    config = {"db_url": DATABASE_URL, **(project.get("config") or {})}
-    return get_or_build_graph(plugin, config)
-
-
-def _thread_config(project_id: str) -> dict:
-    return {"configurable": {"thread_id": project_id}}
-
-
-def _print_graph_state(project_id: str, graph) -> None:
-    state = graph.get_state(config={"configurable": {"thread_id": project_id}})
-    values = state.values or {}
-    next_nodes = state.next or []
-    tasks = state.tasks or []
-
-    typer.echo(f"\n--- Project: {project_id} ---")
-    typer.echo(f"  loop_index          : {values.get('loop_index', 0)}")
-    typer.echo(f"  loop_goal           : {values.get('loop_goal', '')[:80]}")
-    typer.echo(f"  last_result         : {values.get('last_result', '')}")
-    typer.echo(f"  loop_count_since_review: {values.get('loop_count_since_review', 0)}")
-    typer.echo(f"  last_checkpoint_decision: {values.get('last_checkpoint_decision')}")
-    typer.echo(f"  next_nodes          : {list(next_nodes)}")
-
-    for task in tasks:
-        if hasattr(task, "interrupts") and task.interrupts:
-            for interrupt_obj in task.interrupts:
-                typer.echo(f"\n[INTERRUPT] Waiting for human input:")
-                payload = interrupt_obj.value if hasattr(interrupt_obj, "value") else interrupt_obj
-                for k, v in (payload.items() if isinstance(payload, dict) else {}.items()):
-                    if k != "instruction":
-                        typer.echo(f"  {k}: {str(v)[:120]}")
-                if isinstance(payload, dict) and "instruction" in payload:
-                    typer.echo(f"\n  {payload['instruction']}")
-
-    if not next_nodes:
-        typer.echo("\n[DONE] Graph has completed (reached END).")
-    else:
-        typer.echo(f"\n[PAUSED] Run `approve` to resume.")
-
-
-def _maybe_run_migration() -> None:
-    migration_path = Path(__file__).parent.parent / "db" / "migrations" / "001_business_schema.sql"
-    if not migration_path.exists():
-        logger.warning("Migration file not found: %s", migration_path)
-        return
-    try:
-        from framework.db.connection import run_migration
-        run_migration(str(migration_path))
-    except Exception as e:
-        logger.warning("Migration skipped (may already be applied): %s", e)
-
-
-def _get_llm_fn():
-    """Return an LLM callable based on available credentials, or None."""
-    llm_chain = os.getenv("LLM_CHAIN", "")
-    providers = [p.strip() for p in llm_chain.split(",") if p.strip()] if llm_chain else []
-
-    for provider in providers:
-        fn = _try_build_llm_fn(provider)
-        if fn is not None:
-            logger.info("LLM provider selected: %s", provider)
-            return fn
-
-    logger.warning("No LLM provider available; using rule-based clarification fallback.")
-    return None
-
-
-def _try_build_llm_fn(provider: str):
-    """Try to build an LLM callable for the given provider name."""
-    try:
-        if provider == "claude":
-            import anthropic
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                cred_path = os.getenv("CLAUDE_CREDENTIALS_PATH", "")
-                if cred_path and Path(cred_path).exists():
-                    # Attempt to read key from credentials file
-                    creds = yaml.safe_load(Path(cred_path).read_text())
-                    api_key = (creds or {}).get("api_key") or (creds or {}).get("ANTHROPIC_API_KEY")
-            if not api_key:
-                return None
-            client = anthropic.Anthropic(api_key=api_key)
-            def _claude(prompt: str) -> str:
-                msg = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=256,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return msg.content[0].text
-            return _claude
-
-        elif provider in ("codex", "openai"):
-            import openai
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            def _openai(prompt: str) -> str:
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=256,
-                )
-                return resp.choices[0].message.content
-            return _openai
-
-        elif provider == "gemini":
-            import google.generativeai as genai
-            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-            if not api_key:
-                return None
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            def _gemini(prompt: str) -> str:
-                return model.generate_content(prompt).text
-            return _gemini
-
-        elif provider in ("local", "opencode"):
-            endpoint = os.getenv("LOCAL_LLM_ENDPOINT", "http://localhost:11434")
-            model_name = os.getenv("LOCAL_LLM_MODEL", "llama3.2")
-            def _local(prompt: str) -> str:
-                resp = httpx.post(
-                    f"{endpoint}/api/generate",
-                    json={"model": model_name, "prompt": prompt, "stream": False},
-                    timeout=60,
-                )
-                resp.raise_for_status()
-                return resp.json().get("response", "")
-            return _local
-
-    except Exception as e:
-        logger.debug("Provider '%s' unavailable: %s", provider, e)
-    return None
-
-
-def _create_planka_card(project_id: str, project_name: str) -> None:
-    """Create a Planka card for this project in the 'Clarifying' column."""
-    planka_url = os.getenv("PLANKA_API_URL", "")
-    planka_token = os.getenv("PLANKA_TOKEN", "")
-    planka_board_id = os.getenv("PLANKA_BOARD_ID", "")
-
-    if not (planka_url and planka_token and planka_board_id):
-        logger.debug("Planka not configured; skipping card creation.")
-        return
-
-    try:
-        # Find "Clarifying" list id
-        resp = httpx.get(
-            f"{planka_url}/api/boards/{planka_board_id}",
-            headers={"Authorization": f"Bearer {planka_token}"},
+            f"{base_url}/api/access-tokens",
+            json={"emailOrUsername": email, "password": password},
             timeout=10,
         )
-        resp.raise_for_status()
-        board = resp.json().get("item", {})
-        lists = board.get("lists") or []
+        data = resp.json()
 
-        list_id = None
-        for lst in lists:
-            if lst.get("name") == "Clarifying":
-                list_id = lst.get("id")
-                break
+    token = data.get("item")
+    if not token:
+        raise RuntimeError(f"Login failed: {data.get('message') or resp.text[:200]}")
+    return token
 
-        if not list_id:
-            logger.warning("Planka 'Clarifying' column not found on board %s.", planka_board_id)
+
+def _init_planka_board(dest: Path) -> None:
+    import httpx
+
+    env_path = dest / ".env"
+    if not env_path.exists():
+        print("  No .env found in current directory. Run 'agentic-research init' first.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    env = _load_dotenv(env_path)
+
+    base_url  = env.get("PLANKA_API_URL", "http://localhost:7002").rstrip("/")
+    email     = env.get("DEFAULT_ADMIN_EMAIL", "agentic@local.dev")
+    password  = env.get("DEFAULT_ADMIN_PASSWORD", "agentic-planka-pwd")
+
+    # Warn if already configured
+    if env.get("PLANKA_TOKEN") and env.get("PLANKA_BOARD_ID"):
+        if not _ask_yn("PLANKA_TOKEN and PLANKA_BOARD_ID already set in .env. Re-initialize?",
+                       default=False):
+            print("  Skipped.")
             return
 
-        httpx.post(
-            f"{planka_url}/api/lists/{list_id}/cards",
-            headers={"Authorization": f"Bearer {planka_token}"},
-            json={
-                "name": project_name,
-                "description": f"thread_id: {project_id}",
-            },
+    # ── 1. Login ────────────────────────────────────────────────────────────
+    print()
+    print(f"  Connecting to Planka at {base_url} ...")
+    try:
+        token = _planka_login(base_url, email, password)
+    except Exception as e:
+        print(f"  Login failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    print("  ✓ Logged in")
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # ── 2. Create Planka project ─────────────────────────────────────────────
+    proj_name = _ask_str("  Planka project name", default="Agentic Research")
+    resp = httpx.post(
+        f"{base_url}/api/projects",
+        headers=headers,
+        json={"name": proj_name, "type": "shared"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    project_id = resp.json()["item"]["id"]
+    print(f"  ✓ Project '{proj_name}' created  (id: {project_id})")
+
+    # ── 3. Create board ──────────────────────────────────────────────────────
+    board_name = _ask_str("  Board name", default="Research Workflow")
+    resp = httpx.post(
+        f"{base_url}/api/projects/{project_id}/boards",
+        headers=headers,
+        json={"name": board_name, "position": 1},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    board_id = resp.json()["item"]["id"]
+    print(f"  ✓ Board '{board_name}' created  (id: {board_id})")
+
+    # ── 4. Create lists (columns) ────────────────────────────────────────────
+    resp = httpx.get(f"{base_url}/api/boards/{board_id}", headers=headers, timeout=10)
+    resp.raise_for_status()
+    existing_lists = {
+        lst["name"]
+        for lst in (resp.json().get("included", {}).get("lists") or [])
+    }
+    for name, position in _PLANKA_LISTS:
+        if name in existing_lists:
+            print(f"  – List '{name}' already exists, skipping")
+            continue
+        r = httpx.post(
+            f"{base_url}/api/boards/{board_id}/lists",
+            headers=headers,
+            json={"name": name, "position": position, "type": "active"},
             timeout=10,
         )
-        typer.echo(f"        ✓ Planka card created in 'Clarifying'")
-    except Exception as e:
-        logger.warning("Could not create Planka card: %s", e)
+        r.raise_for_status()
+        print(f"  ✓ List '{name}' created")
+
+    # ── 5. Create custom fields ──────────────────────────────────────────────
+    # New Planka API: fields live inside a group.
+    # Step 5a: ensure the group exists
+    resp = httpx.get(f"{base_url}/api/boards/{board_id}", headers=headers, timeout=10)
+    resp.raise_for_status()
+    included      = resp.json().get("included", {})
+    existing_groups = included.get("customFieldGroups") or []
+    existing_fields = {cf["name"] for cf in (included.get("customFields") or [])}
+
+    group_name = "Research Config"
+    group_id   = next((g["id"] for g in existing_groups if g["name"] == group_name), None)
+    if group_id:
+        print(f"  – Custom field group '{group_name}' already exists, skipping")
+    else:
+        r = httpx.post(
+            f"{base_url}/api/boards/{board_id}/custom-field-groups",
+            headers=headers,
+            json={"name": group_name, "position": 1},
+            timeout=10,
+        )
+        r.raise_for_status()
+        group_id = r.json()["item"]["id"]
+        print(f"  ✓ Custom field group '{group_name}' created")
+
+    # Step 5b: create each field under the group
+    for position, (name, _ftype) in enumerate(_PLANKA_CUSTOM_FIELDS, start=1):
+        if name in existing_fields:
+            print(f"  – Custom field '{name}' already exists, skipping")
+            continue
+        r = httpx.post(
+            f"{base_url}/api/custom-field-groups/{group_id}/custom-fields",
+            headers=headers,
+            json={"name": name, "position": position},
+            timeout=10,
+        )
+        r.raise_for_status()
+        print(f"  ✓ Custom field '{name}' created")
+
+    # ── 6. Write PLANKA_TOKEN and PLANKA_BOARD_ID back to .env ──────────────
+    raw = env_path.read_text(encoding="utf-8")
+    raw = _patch_env(raw, {"PLANKA_TOKEN": token, "PLANKA_BOARD_ID": board_id})
+    env_path.write_text(raw, encoding="utf-8")
+    print()
+    print("  ✓ PLANKA_TOKEN  written to .env")
+    print("  ✓ PLANKA_BOARD_ID written to .env")
+    print()
+    print("  Next: restart the engine to pick up the new settings")
+    print("    docker compose restart agentic-framework-api")
 
 
-if __name__ == "__main__":
-    app()
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    args = sys.argv[1:]
+
+    if not args or args[0] in ("-h", "--help"):
+        print("Usage: agentic-research <command>")
+        print()
+        print("Commands:")
+        print("  init                Copy deployment files to current directory and configure LLM")
+        print("  init-planka-board   Create Planka project/board/lists and write token to .env")
+        sys.exit(0)
+
+    if args[0] == "init":
+        _init(Path.cwd())
+    elif args[0] == "init-planka-board":
+        _init_planka_board(Path.cwd())
+    else:
+        print(f"Unknown command: {args[0]}", file=sys.stderr)
+        print("Run 'agentic-research --help' for usage.", file=sys.stderr)
+        sys.exit(1)
