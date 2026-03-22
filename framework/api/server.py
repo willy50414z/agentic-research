@@ -443,7 +443,7 @@ async def _scan_stalled_reviews() -> None:
                 )
                 rows = cur.fetchall()
         for project_id, config in rows:
-            started_at = (config or {}).get("review_started_at", 0)
+            started_at = (config or {}).get("review_started_at") or 0
             if started_at < stale_cutoff:
                 logger.warning(
                     "Clearing stalled review_in_progress for project '%s'.", project_id
@@ -493,6 +493,8 @@ def _run_migrations() -> None:
 # ---------------------------------------------------------------------------
 
 def _extract_thread_id(description: str) -> str | None:
+    if not description:
+        return None
     match = re.search(r"thread_id:\s*(\S+)", description)
     return match.group(1) if match else None
 

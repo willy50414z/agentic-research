@@ -314,5 +314,7 @@ def _set_planka_card_id_in_db(project_id: str, card_id: str, db_url: str | None)
 
 
 def _extract_thread_id(description: str) -> str | None:
+    if not description:
+        return None
     match = re.search(r"thread_id:\s*(\S+)", description)
     return match.group(1) if match else None
