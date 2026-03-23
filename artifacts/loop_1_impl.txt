@@ -1,3 +1,0 @@
-Loop 1 implementation
-Strategy : MACD crossover
-Signals  : 71

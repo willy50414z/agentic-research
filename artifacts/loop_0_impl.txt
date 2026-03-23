@@ -1,3 +1,0 @@
-Loop 0 implementation
-Strategy : RSI-20 momentum
-Signals  : 48
