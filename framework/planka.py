@@ -71,7 +71,7 @@ class PlankaSink:
     def post_comment(self, project_id: str, text: str) -> None:
         """
         Post a comment to the card associated with project_id.
-        Uses POST /api/comment-actions {"cardId": ..., "text": ...}.
+        Uses POST /api/cards/{cardId}/comments {"text": ...}.
         Non-blocking: logs warning on failure.
         """
         card_id = self.resolve_card_id(project_id)
@@ -80,9 +80,9 @@ class PlankaSink:
             return
         try:
             resp = httpx.post(
-                f"{self._url}/api/comment-actions",
+                f"{self._url}/api/cards/{card_id}/comments",
                 headers={"Authorization": f"Bearer {self._token}"},
-                json={"cardId": card_id, "text": text},
+                json={"text": text},
                 timeout=10,
             )
             resp.raise_for_status()
@@ -122,18 +122,20 @@ class PlankaSink:
         """
         Download the most recently uploaded .md attachment from a card.
 
-        Uses GET /api/cards/{cardId}/attachments, picks latest by createdAt.
+        Uses GET /api/cards/{cardId} → included.attachments, picks latest by createdAt.
+        Downloads via MinIO (Planka's /attachments/ endpoint doesn't accept Bearer token
+        auth — it only uses cookie sessions; MinIO gives direct S3 access).
         Returns the attachment text content, or None if no .md attachment found.
         Non-blocking: returns None on any error.
         """
         try:
             resp = httpx.get(
-                f"{self._url}/api/cards/{card_id}/attachments",
+                f"{self._url}/api/cards/{card_id}",
                 headers={"Authorization": f"Bearer {self._token}"},
                 timeout=10,
             )
             resp.raise_for_status()
-            attachments = resp.json().get("items") or []
+            attachments = resp.json().get("included", {}).get("attachments") or []
             md_attachments = [
                 a for a in attachments
                 if (a.get("name") or "").lower().endswith(".md")
@@ -146,22 +148,9 @@ class PlankaSink:
                 key=lambda a: a.get("createdAt") or "",
                 reverse=True,
             )[0]
-            # Download the actual file content
-            dl_url = latest.get("url") or latest.get("coverUrl") or ""
-            if not dl_url:
-                logger.warning("Attachment has no URL: %s", latest.get("id"))
-                return None
-            # dl_url may be relative path
-            if dl_url.startswith("/"):
-                dl_url = f"{self._url}{dl_url}"
-            dl_resp = httpx.get(
-                dl_url,
-                headers={"Authorization": f"Bearer {self._token}"},
-                timeout=30,
-                follow_redirects=True,
-            )
-            dl_resp.raise_for_status()
-            return dl_resp.text
+            att_id = latest.get("id", "")
+            att_name = latest.get("name", "spec.md")
+            return _download_planka_attachment_via_minio(att_id, att_name, self._db_url)
         except Exception as e:
             logger.warning("download_latest_spec_attachment failed for card '%s': %s", card_id, e)
             return None
@@ -179,6 +168,7 @@ class PlankaSink:
             resp = httpx.post(
                 f"{self._url}/api/cards/{card_id}/attachments",
                 headers={"Authorization": f"Bearer {self._token}"},
+                data={"type": "file", "name": filename},
                 files={"file": (filename, io.BytesIO(file_bytes), "text/markdown")},
                 timeout=30,
             )
@@ -318,3 +308,56 @@ def _extract_thread_id(description: str) -> str | None:
         return None
     match = re.search(r"thread_id:\s*(\S+)", description)
     return match.group(1) if match else None
+
+
+def _download_planka_attachment_via_minio(
+    att_id: str,
+    att_name: str,
+    db_url: str | None,
+) -> str | None:
+    """
+    Download a Planka attachment via MinIO.
+
+    Planka stores files in the 'planka-attachments' bucket under
+    'private/attachments/{uploadedFileId}/{filename}'.
+    The uploadedFileId is read from the shared Planka DB (attachment.data->>'uploadedFileId').
+    """
+    try:
+        from framework.db.connection import get_connection
+        with get_connection(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT data->>'uploadedFileId' FROM attachment WHERE id = %s",
+                    (att_id,),
+                )
+                row = cur.fetchone()
+        if not row or not row[0]:
+            logger.warning("No uploadedFileId for attachment '%s'", att_id)
+            return None
+        uploaded_file_id = row[0]
+    except Exception as e:
+        logger.warning("Could not read uploadedFileId for attachment '%s': %s", att_id, e)
+        return None
+
+    try:
+        import io, os
+        from minio import Minio
+        endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
+        client = Minio(
+            endpoint,
+            access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+            secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+            secure=False,
+        )
+        key = f"private/attachments/{uploaded_file_id}/{att_name}"
+        bucket = "planka-attachments"
+        response = client.get_object(bucket, key)
+        try:
+            content = response.read().decode("utf-8", errors="replace")
+        finally:
+            response.close()
+            response.release_conn()
+        return content
+    except Exception as e:
+        logger.warning("MinIO download failed for attachment '%s': %s", att_id, e)
+        return None

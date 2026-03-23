@@ -212,11 +212,9 @@ def _run_spec_review_bg(
         return
 
     try:
-        # --- 2. Ensure thread_id in card description ---
-        if not _extract_thread_id(description):
-            new_desc = f"thread_id: {project_id}\n\n{description}"
-            if _planka_sink:
-                _planka_sink.update_card_description(project_id, new_desc)
+        # --- 2. Cache card_id first (needed for all subsequent Planka calls) ---
+        if _planka_sink:
+            _planka_sink.cache_card_id(project_id, card_id)
 
         # --- 3. Upsert project stub + set review_in_progress ---
         create_project(
@@ -230,8 +228,12 @@ def _run_spec_review_bg(
             },
             db_url=DATABASE_URL,
         )
-        if _planka_sink:
-            _planka_sink.cache_card_id(project_id, card_id)
+
+        # --- 2b. Ensure thread_id in card description (now card_id is cached) ---
+        if not _extract_thread_id(description):
+            new_desc = f"thread_id: {project_id}\n\n{description or ''}"
+            if _planka_sink:
+                _planka_sink.update_card_description(project_id, new_desc)
 
         # --- 4. Check for .md attachment — required ---
         spec_md = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
@@ -365,11 +367,33 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
     payload = await request.json()
     logger.info("Planka webhook raw payload: %s", payload)
 
-    list_name = (payload.get("list") or {}).get("name", "")
-    card = payload.get("item") or {}
+    # Only process cardUpdate events (card moved to a column)
+    event = payload.get("event", "")
+    if event != "cardUpdate":
+        return {"status": "ignored", "event": event}
+
+    data = payload.get("data") or {}
+    card = data.get("item") or {}
     card_id = card.get("id", "")
     description = card.get("description") or ""
     card_name = card.get("name", "")
+
+    # Resolve destination list name from included lists
+    included = data.get("included") or {}
+    lists_included = included.get("lists") or []
+    current_list_id = card.get("listId", "")
+    list_name = next(
+        (lst.get("name", "") for lst in lists_included if lst.get("id") == current_list_id),
+        "",
+    )
+
+    # Only process if the card actually moved to a different list
+    prev_data = payload.get("prevData") or {}
+    prev_list_id = (prev_data.get("item") or {}).get("listId", "")
+    if not list_name or current_list_id == prev_list_id:
+        return {"status": "ignored", "reason": "not a list change"}
+
+    logger.info("Card '%s' moved to list '%s'", card_name, list_name)
 
     # Spec Pending Review: trigger dual-LLM agent
     if list_name == _COL_SPEC_PENDING:
@@ -537,9 +561,14 @@ def _move_planka_card(project_id: str, column_name: str) -> None:
         for lst in lists:
             if lst.get("name") == column_name:
                 target_list_id = lst.get("id")
-        for card in cards:
-            if _extract_thread_id(card.get("description") or "") == project_id:
-                card_id = card.get("id")
+
+        # Try cached card_id first (avoids needing thread_id in description)
+        if _planka_sink:
+            card_id = _planka_sink.resolve_card_id(project_id)
+        if not card_id:
+            for card in cards:
+                if _extract_thread_id(card.get("description") or "") == project_id:
+                    card_id = card.get("id")
 
         if card_id and target_list_id:
             if _planka_sink:
@@ -617,7 +646,18 @@ def _build_llm_chain() -> list[tuple[str, callable]]:
 
 def _try_provider(provider: str):
     try:
-        if provider == "claude":
+        if provider in ("claude-cli",):
+            import subprocess
+            def _claude_cli(prompt: str) -> str:
+                result = subprocess.run(
+                    ["claude", "-p", prompt],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"claude-cli exited {result.returncode}: {result.stderr[:200]}")
+                return result.stdout
+            return _claude_cli
+        elif provider in ("claude", "claude-api"):
             import anthropic
             api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
@@ -631,7 +671,18 @@ def _try_provider(provider: str):
                 )
                 return msg.content[0].text
             return _claude
-        elif provider in ("codex", "openai"):
+        elif provider in ("codex-cli",):
+            import subprocess
+            def _codex_cli(prompt: str) -> str:
+                result = subprocess.run(
+                    ["codex", "-q", "--full-auto", prompt],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"codex-cli exited {result.returncode}: {result.stderr[:200]}")
+                return result.stdout
+            return _codex_cli
+        elif provider in ("codex", "openai", "openai-api"):
             import openai
             client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             def _openai(prompt: str) -> str:
@@ -642,7 +693,18 @@ def _try_provider(provider: str):
                 )
                 return resp.choices[0].message.content
             return _openai
-        elif provider == "gemini":
+        elif provider in ("gemini-cli",):
+            import subprocess
+            def _gemini_cli(prompt: str) -> str:
+                result = subprocess.run(
+                    ["gemini", "-p", prompt],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"gemini-cli exited {result.returncode}: {result.stderr[:200]}")
+                return result.stdout
+            return _gemini_cli
+        elif provider in ("gemini", "gemini-api"):
             import google.generativeai as genai
             api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if not api_key:
