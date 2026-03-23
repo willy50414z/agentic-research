@@ -1,6 +1,6 @@
 # deploy/Dockerfile
 # Build context is the repo root (.), so all paths are relative to there.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip
 
 # 全域安裝 Claude CLI
 RUN npm install -g @anthropic-ai/claude-code

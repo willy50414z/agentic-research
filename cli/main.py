@@ -295,8 +295,7 @@ def _init(dest: Path) -> None:
        docker compose up -d
 
   3. Run database migration
-       docker exec -i agentic-research-postgres psql \\
-         -U agentic-postgres-user -d agentic-research < schema.sql
+       docker exec -i agentic-research-postgres psql -U agentic-postgres-user -d agentic-research < schema.sql
 
   4. Open Planka  →  http://localhost:7002
        Log in with DEFAULT_ADMIN_EMAIL / DEFAULT_ADMIN_PASSWORD from .env
@@ -489,7 +488,39 @@ def _init_planka_board(dest: Path) -> None:
         r.raise_for_status()
         print(f"  ✓ Custom field '{name}' created")
 
-    # ── 6. Write PLANKA_TOKEN and PLANKA_BOARD_ID back to .env ──────────────
+    # ── 6. Create webhook ────────────────────────────────────────────────────
+    # Default: internal Docker service name so Planka can reach the engine.
+    default_webhook_url = env.get(
+        "FRAMEWORK_WEBHOOK_URL", "http://langgraph-engine:8000/planka-webhook"
+    )
+    webhook_url = _ask_str("  Webhook URL (Planka→Framework)", default=default_webhook_url)
+
+    # Check if a webhook with same URL already exists (webhooks are global in Planka)
+    resp = httpx.get(f"{base_url}/api/webhooks", headers=headers, timeout=10)
+    existing_webhooks = resp.json().get("items", []) if resp.status_code == 200 else []
+    existing_webhook = next((w for w in existing_webhooks if w.get("url") == webhook_url), None)
+
+    if existing_webhook:
+        print(f"  – Webhook '{webhook_url}' already exists, skipping")
+    else:
+        r = httpx.post(
+            f"{base_url}/api/webhooks",
+            headers=headers,
+            json={
+                "name": "agentic-research",
+                "url": webhook_url,
+                "events": "cardUpdate",
+            },
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            print(f"  ✓ Webhook created  → {webhook_url}")
+        else:
+            print(f"  ✗ Webhook creation failed ({r.status_code}): {r.text[:120]}")
+            print("    Set it manually: Planka → Admin → Webhooks → Create Webhook")
+            print(f"    URL: {webhook_url}  |  Events: cardUpdate")
+
+    # ── 7. Write PLANKA_TOKEN and PLANKA_BOARD_ID back to .env ──────────────
     raw = env_path.read_text(encoding="utf-8")
     raw = _patch_env(raw, {"PLANKA_TOKEN": token, "PLANKA_BOARD_ID": board_id})
     env_path.write_text(raw, encoding="utf-8")

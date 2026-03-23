@@ -128,8 +128,10 @@ def run_once(
 
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr or stdout or "(no output)"
         raise RuntimeError(
-            f"{target.value} CLI failed (exit {completed.returncode}). stderr: {stderr[:300]}"
+            f"{target.value} CLI failed (exit {completed.returncode}): {detail[:300]}"
         )
 
     stdout = (completed.stdout or "").strip()

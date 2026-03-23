@@ -68,7 +68,7 @@ services:
       - ${VOLUME_BASE_DIR:-../data}/project-background-images:/app/public/project-background-images
     ports:
       - "7002:1337"
-    env_file: ../.env
+    env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
       SECRET_KEY: ${SECRET_KEY:-changeme-generate-with-openssl-rand-hex-32}
@@ -92,7 +92,7 @@ services:
       - ${VOLUME_BASE_DIR:-../data}/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-    env_file: ../.env
+    env_file: .env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentic-postgres-user} -d ${POSTGRES_DB:-agentic-research}"]
       interval: 10s
@@ -110,7 +110,8 @@ services:
       - "7001:8000"
     volumes:
       - ..:/app
-    env_file: ../.env
+      - ${LOCAL_CLAUDE_CONFIG_DIR}:${CLAUDE_CONFIG_DIR}
+    env_file: .env
     environment:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-agentic-minio-user}

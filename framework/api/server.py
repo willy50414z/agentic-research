@@ -117,6 +117,9 @@ def _build_initial_state(project: dict) -> dict:
 
 
 def _slugify(name: str) -> str:
+    import unicodedata
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
 
 
@@ -397,7 +400,7 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # Spec Pending Review: trigger dual-LLM agent
     if list_name == _COL_SPEC_PENDING:
-        project_id = _extract_thread_id(description) or _slugify(card_name)
+        project_id = _extract_thread_id(description) or _slugify(card_name) or card_id
         background_tasks.add_task(
             _run_spec_review_bg, project_id, card_id, card_name, description
         )
@@ -645,87 +648,5 @@ def _build_llm_chain() -> list[tuple[str, callable]]:
 
 
 def _try_provider(provider: str):
-    try:
-        if provider in ("claude-cli",):
-            import subprocess
-            def _claude_cli(prompt: str) -> str:
-                result = subprocess.run(
-                    ["claude", "-p", prompt],
-                    capture_output=True, text=True, timeout=300,
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"claude-cli exited {result.returncode}: {result.stderr[:200]}")
-                return result.stdout
-            return _claude_cli
-        elif provider in ("claude", "claude-api"):
-            import anthropic
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                return None
-            client = anthropic.Anthropic(api_key=api_key)
-            def _claude(prompt: str) -> str:
-                msg = client.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=4096,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return msg.content[0].text
-            return _claude
-        elif provider in ("codex-cli",):
-            import subprocess
-            def _codex_cli(prompt: str) -> str:
-                result = subprocess.run(
-                    ["codex", "-q", "--full-auto", prompt],
-                    capture_output=True, text=True, timeout=300,
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"codex-cli exited {result.returncode}: {result.stderr[:200]}")
-                return result.stdout
-            return _codex_cli
-        elif provider in ("codex", "openai", "openai-api"):
-            import openai
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            def _openai(prompt: str) -> str:
-                resp = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=4096,
-                )
-                return resp.choices[0].message.content
-            return _openai
-        elif provider in ("gemini-cli",):
-            import subprocess
-            def _gemini_cli(prompt: str) -> str:
-                result = subprocess.run(
-                    ["gemini", "-p", prompt],
-                    capture_output=True, text=True, timeout=300,
-                )
-                if result.returncode != 0:
-                    raise RuntimeError(f"gemini-cli exited {result.returncode}: {result.stderr[:200]}")
-                return result.stdout
-            return _gemini_cli
-        elif provider in ("gemini", "gemini-api"):
-            import google.generativeai as genai
-            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-            if not api_key:
-                return None
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            def _gemini(prompt: str) -> str:
-                return model.generate_content(prompt).text
-            return _gemini
-        elif provider in ("local", "opencode"):
-            endpoint = os.getenv("LOCAL_LLM_ENDPOINT", "http://localhost:11434")
-            model_name = os.getenv("LOCAL_LLM_MODEL", "llama3.2")
-            def _local(prompt: str) -> str:
-                r = httpx.post(
-                    f"{endpoint}/api/generate",
-                    json={"model": model_name, "prompt": prompt, "stream": False},
-                    timeout=120,
-                )
-                r.raise_for_status()
-                return r.json().get("response", "")
-            return _local
-    except Exception as e:
-        logger.debug("Provider '%s' unavailable: %s", provider, e)
-    return None
+    from framework.llm_providers import LLMProviderFactory
+    return LLMProviderFactory.build(provider)
