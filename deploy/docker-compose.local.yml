@@ -102,7 +102,6 @@ services:
   # LangGraph 流程引擎（從 source build，repo 根目錄掛載以支援 hot-reload）
   langgraph-engine:
     build:
-      context: ..
       dockerfile: deploy/Dockerfile
     container_name: agentic-langgraph
     restart: unless-stopped
@@ -111,6 +110,8 @@ services:
     volumes:
       - ..:/app
       - ${LOCAL_CLAUDE_CONFIG_DIR}:${CLAUDE_CONFIG_DIR}
+      - ${LOCAL_GEMINI_CONFIG_DIR}:${GEMINI_CONFIG_DIR}
+      - ${LOCAL_CODEX_CONFIG_DIR}:${CODEX_CONFIG_DIR}
     env_file: .env
     environment:
       MINIO_ENDPOINT: http://minio:9000

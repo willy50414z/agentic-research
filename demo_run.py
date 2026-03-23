@@ -125,18 +125,18 @@ def run_demo() -> None:
     thread = {"configurable": {"thread_id": PROJECT_ID}}
 
     initial_state = {
-        "project_id":               PROJECT_ID,
-        "loop_index":               0,
-        "loop_goal":                GOAL,
-        "implementation_plan":      None,
-        "last_result":              "UNKNOWN",
-        "last_reason":              "",
-        "loop_count_since_review":  0,
-        "last_checkpoint_decision": None,
-        "needs_human_approval":     False,
-        "attempt_count":            0,
-        "test_metrics":             {},
-        "artifacts":                [],
+        "project_id":           PROJECT_ID,
+        "loop_index":           0,
+        "loop_goal":            GOAL,
+        "implementation_plan":  None,
+        "last_result":          "UNKNOWN",
+        "last_reason":          "",
+        "max_loops":            3,
+        "attempt_index":        0,
+        "needs_human_approval": False,
+        "attempt_count":        0,
+        "test_metrics":         {},
+        "artifacts":            [],
     }
 
     # ── Phase 1: start until first interrupt ──────────────────────────────────
@@ -222,7 +222,7 @@ def _show_state(graph, thread: dict) -> None:
     logger.info("  ┌─ Graph State Snapshot ───────────────────────────────────")
     logger.info("  │  loop_index          = %d", vals.get("loop_index", 0))
     logger.info("  │  last_result         = %s", vals.get("last_result", ""))
-    logger.info("  │  loop_count_since_review = %d", vals.get("loop_count_since_review", 0))
+    logger.info("  │  attempt_index       = %d", vals.get("attempt_index", 0))
     logger.info("  │  attempt_count       = %d", vals.get("attempt_count", 0))
     logger.info("  │  artifacts           = %d items", len(vals.get("artifacts") or []))
     logger.info("  │  next_nodes          = %s", list(state.next or []))

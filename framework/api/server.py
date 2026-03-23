@@ -5,8 +5,6 @@ FastAPI server for the agentic research framework.
 
 Planka column state machine:
   Planning → Spec Pending Review → Verify → Review → Done / Failed
-                ↑ (issues found)    ↑ (loop review continue)
-                └── (replan)────────┘
 
 Endpoints:
   POST /planka-webhook  — Planka card-move events
@@ -14,8 +12,12 @@ Endpoints:
 
 Webhook routing:
   Spec Pending Review → _run_spec_review_bg  (dual-LLM spec agent)
-  Verify / Done        → resume: action=continue
-  Failed               → resume: action=terminate
+  Verify              → fresh start (if no active checkpoint) or resume
+  Failed              → resume: action=terminate
+
+End conditions after graph completes:
+  last_result == "PASS"      → card moves to Done
+  last_result == "TERMINATE" → card moves to Review + TERMINATE reason posted as comment
 
 Scheduler:
   Every 60 s: clear review_in_progress flags older than 5 minutes (crash recovery).
@@ -32,7 +34,7 @@ import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
 from langgraph.types import Command
 
-from framework.db.queries import create_project, get_project, record_checkpoint_decision
+from framework.db.queries import create_project, get_project
 from framework.db.connection import run_migration
 from framework.plugin_registry import resolve as resolve_plugin
 from framework.graph import get_or_build_graph
@@ -85,19 +87,9 @@ def _has_checkpoint(graph, project_id: str) -> bool:
         return False
 
 
-def _graph_terminated(graph, project_id: str) -> bool:
-    """Return True if the graph completed with last_result == TERMINATE."""
-    try:
-        state = graph.get_state(config=_thread_config(project_id))
-        if state and state.values:
-            return state.values.get("last_result") == "TERMINATE"
-    except Exception:
-        pass
-    return False
-
-
 def _build_initial_state(project: dict) -> dict:
-    spec = (project.get("config") or {}).get("spec") or {}
+    cfg = project.get("config") or {}
+    spec = cfg.get("spec") or {}
     goal = spec.get("hypothesis") or project.get("goal") or "research"
     return {
         "project_id": project["id"],
@@ -107,8 +99,8 @@ def _build_initial_state(project: dict) -> dict:
         "implementation_plan": None,
         "last_result": "UNKNOWN",
         "last_reason": "",
-        "loop_count_since_review": 0,
-        "last_checkpoint_decision": None,
+        "max_loops": int(cfg.get("max_loops") or 3),
+        "attempt_index": 0,
         "needs_human_approval": False,
         "attempt_count": 0,
         "test_metrics": {},
@@ -128,36 +120,36 @@ def _slugify(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _run_resume_bg(project_id: str, decision: dict) -> None:
-    """Background: resume a paused graph thread and update Planka card position."""
+    """Background: resume a paused graph thread (plan-approval interrupt) and update card."""
     try:
         graph = _get_graph(project_id)
-        pre_state = graph.get_state(config=_thread_config(project_id))
-        loop_index = (pre_state.values or {}).get("loop_index", 0)
-
         graph.invoke(Command(resume=decision), config=_thread_config(project_id))
 
-        record_checkpoint_decision(
-            project_id=project_id,
-            loop_index=loop_index,
-            action=decision.get("action", ""),
-            notes=decision.get("notes") or None,
-            modified_plan={k: v for k, v in decision.items()
-                           if k not in ("action", "notes")} or None,
-            db_url=DATABASE_URL,
-        )
+        state = graph.get_state(config=_thread_config(project_id))
+        vals = (state.values or {}) if state else {}
+        last_result = vals.get("last_result", "UNKNOWN")
+        last_reason = vals.get("last_reason", "")
 
-        action = decision.get("action", "")
-        if action == "terminate":
-            _move_planka_card(project_id, _COL_DONE)
-        elif _graph_terminated(graph, project_id):
-            _move_planka_card(project_id, _COL_PLANNING)
-        else:
-            _move_planka_card(project_id, _COL_VERIFY)
-
-        logger.info("Resumed project '%s' with action: %s", project_id, action)
+        _finish_run(project_id, last_result, last_reason)
+        logger.info("Resumed project '%s' with action: %s", project_id, decision.get("action"))
     except Exception as e:
         logger.exception("Background resume failed for project '%s': %s", project_id, e)
         _move_planka_card(project_id, _COL_FAILED)
+
+
+def _finish_run(project_id: str, last_result: str, last_reason: str) -> None:
+    """Move card to Done/Review/Planning based on graph's final last_result."""
+    if last_result == "PASS":
+        _move_planka_card(project_id, _COL_DONE)
+    elif last_result == "TERMINATE":
+        if _planka_sink:
+            _planka_sink.post_comment(
+                project_id,
+                f"**Research ended — moved to Review**\n\nReason: {last_reason[:500]}",
+            )
+        _move_planka_card(project_id, _COL_REVIEW)
+    else:
+        _move_planka_card(project_id, _COL_PLANNING)
 
 
 def _run_start_bg(project_id: str, initial_state: dict) -> None:
@@ -174,14 +166,16 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
             "planka_sink": _planka_sink,
         }
         graph = get_or_build_graph(plugin, config)
-        _move_planka_card(project_id, _COL_VERIFY)
 
         graph.invoke(initial_state, config=_thread_config(project_id))
 
-        if _graph_terminated(graph, project_id):
-            _move_planka_card(project_id, _COL_PLANNING)
-        else:
-            logger.info("Graph completed for project '%s'.", project_id)
+        state = graph.get_state(config=_thread_config(project_id))
+        vals = (state.values or {}) if state else {}
+        last_result = vals.get("last_result", "UNKNOWN")
+        last_reason = vals.get("last_reason", "")
+
+        _finish_run(project_id, last_result, last_reason)
+        logger.info("Graph completed for project '%s' with result: %s", project_id, last_result)
     except Exception as e:
         logger.exception("Background start failed for project '%s': %s", project_id, e)
         _move_planka_card(project_id, _COL_FAILED)
@@ -298,8 +292,7 @@ def _run_spec_review_bg(
         custom_fields = (
             _planka_sink.read_card_custom_fields(card_id) if _planka_sink else {}
         )
-        review_interval = int(custom_fields.get("review_interval") or 5)
-        max_loops = int(custom_fields.get("max_loops") or 30)
+        max_loops = int(custom_fields.get("max_loops") or 3)
 
         parsed = parse_spec_md(result2.enhanced_spec_md)
         create_project(
@@ -309,7 +302,6 @@ def _run_spec_review_bg(
             goal=parsed.get("hypothesis", ""),
             config={
                 "spec": parsed,
-                "review_interval": review_interval,
                 "max_loops": max_loops,
                 "review_in_progress": False,
             },
@@ -321,7 +313,7 @@ def _run_spec_review_bg(
                 project_id,
                 f"**Spec approved — research starting**\n"
                 f"Domain: {result2.domain} | Plugin: {parsed.get('plugin')} | "
-                f"Review every {review_interval} loops | Max {max_loops} loops",
+                f"Max {max_loops} loops",
             )
 
         _move_planka_card(project_id, _COL_VERIFY)
@@ -406,13 +398,8 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
         )
         return {"status": "spec_review_queued", "project_id": project_id}
 
-    # Resume routing
-    action_map = {
-        _COL_VERIFY: "continue",
-        _COL_DONE:   "continue",
-        _COL_FAILED:  "terminate",
-    }
-    if list_name not in action_map:
+    # Only handle Verify and Failed columns
+    if list_name not in (_COL_VERIFY, _COL_FAILED):
         return {"status": "ignored", "list": list_name}
 
     project_id = _extract_thread_id(description)
@@ -424,12 +411,36 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
     if project is None:
         return {"status": "error", "detail": f"Project '{project_id}' not found."}
 
-    notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
-    decision = {"action": action_map[list_name], "notes": notes}
+    if list_name == _COL_VERIFY:
+        try:
+            graph = _get_graph(project_id)
+            has_checkpoint = _has_checkpoint(graph, project_id)
+        except Exception:
+            has_checkpoint = False
 
-    background_tasks.add_task(_run_resume_bg, project_id, decision)
-    logger.info("Planka webhook: project=%s action=%s", project_id, action_map[list_name])
-    return {"status": "ok", "project_id": project_id, "action": action_map[list_name]}
+        if has_checkpoint:
+            # Resume a plan-approval interrupt still active
+            notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
+            background_tasks.add_task(_run_resume_bg, project_id, {"action": "continue", "notes": notes})
+            logger.info("Planka webhook: project=%s resuming active checkpoint", project_id)
+            return {"status": "ok", "project_id": project_id, "action": "resume"}
+        else:
+            # Fresh start (e.g. card moved from Review back to Verify)
+            background_tasks.add_task(_run_start_bg, project_id, _build_initial_state(project))
+            logger.info("Planka webhook: project=%s fresh start from Verify", project_id)
+            return {"status": "ok", "project_id": project_id, "action": "start"}
+
+    if list_name == _COL_FAILED:
+        try:
+            graph = _get_graph(project_id)
+            has_checkpoint = _has_checkpoint(graph, project_id)
+        except Exception:
+            has_checkpoint = False
+        if has_checkpoint:
+            notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
+            background_tasks.add_task(_run_resume_bg, project_id, {"action": "terminate", "notes": notes})
+            logger.info("Planka webhook: project=%s terminate active checkpoint", project_id)
+        return {"status": "ok", "project_id": project_id, "action": "terminate"}
 
 
 @app.get("/health")

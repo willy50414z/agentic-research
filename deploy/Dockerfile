@@ -15,6 +15,8 @@ RUN pip install --upgrade pip
 
 # 全域安裝 Claude CLI
 RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @google/gemini-cli
+RUN npm i -g @openai/codex
 
 # 安裝 Python 依賴 — 使用 repo root 的釘版 requirements.txt
 COPY requirements.txt ./requirements.txt

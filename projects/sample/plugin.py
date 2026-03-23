@@ -69,19 +69,8 @@ class SamplePlugin(ResearchPlugin):
     # --- plan -----------------------------------------------------------
 
     def plan_node(self, state: dict) -> dict:
-        loop     = state.get("loop_index", 0)
-        goal     = state.get("loop_goal", "find best model config")
-        decision = state.get("last_checkpoint_decision") or {}
-
-        # Propagate terminate from Loop Review
-        if decision.get("action") == "terminate":
-            logger.info("[Sample] plan: human requested terminate.")
-            return {"last_result": "TERMINATE", "last_reason": "Human requested termination after Loop Review."}
-
-        # Absorb replan notes into goal
-        if decision.get("action") == "replan" and decision.get("notes"):
-            suffix = f"  [REVISED: {decision['notes']}]"
-            goal = (goal + suffix)[:500]
+        loop = state.get("loop_index", 0)
+        goal = state.get("loop_goal", "find best model config")
 
         config = _CONFIGS[min(loop, len(_CONFIGS) - 1)]
         plan   = {"loop": loop, "config": config, "goal": goal}
@@ -90,10 +79,9 @@ class SamplePlugin(ResearchPlugin):
                     loop, config["lr"], config["batch_size"], config["epochs"])
 
         return {
-            "loop_goal":             goal,
-            "implementation_plan":   plan,
-            "needs_human_approval":  True,
-            "last_checkpoint_decision": None,
+            "loop_goal":            goal,
+            "implementation_plan":  plan,
+            "needs_human_approval": True,
         }
 
     # --- implement -------------------------------------------------------
@@ -209,7 +197,6 @@ class SamplePlugin(ResearchPlugin):
         loop    = state.get("loop_index", 0)
         metrics = state.get("test_metrics", {})
         goal    = state.get("loop_goal", "")
-        count   = state.get("loop_count_since_review", 0) + 1
 
         summary = (
             f"Loop {loop} PASS — "
@@ -236,18 +223,13 @@ class SamplePlugin(ResearchPlugin):
         )
 
         return {
-            "last_reason":           summary,
-            "loop_index":            loop + 1,
-            "loop_count_since_review": count,
-            "attempt_count":         0,
+            "last_reason":  summary,
+            "loop_index":   loop + 1,
+            "attempt_count": 0,
             "artifacts": state.get("artifacts", []) + [
                 {"type": "summary", "path": str(report_path)}
             ],
         }
-
-    def get_review_interval(self) -> int:
-        """Loop Review fires after every 2 PASS loops."""
-        return 2
 
 
 # ---------------------------------------------------------------------------

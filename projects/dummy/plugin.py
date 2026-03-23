@@ -13,9 +13,7 @@ Behaviour:
   - summarize: generates a brief text summary, writes to ./artifacts/.
 
 Human-in-the-loop:
-  Only loop_review (every N PASS loops via notify_planka) requires human input.
-  Planning-column review is handled externally via Planka + spec.md edits.
-  No plan_review interrupt inside the graph.
+  No interrupts — fully automatic. max_loops enforced by framework analyze wrapper.
 
 No actual CLI agents are called — all outputs are deterministic for easy testing.
 """
@@ -43,18 +41,7 @@ class DummyPlugin(ResearchPlugin):
 
     def plan_node(self, state: dict) -> dict:
         loop_index = state.get("loop_index", 0)
-        decision = state.get("last_checkpoint_decision") or {}
-
-        # Terminate if human said so during loop review
-        if decision.get("action") == "terminate":
-            logger.info("[DummyPlugin] plan: received terminate decision.")
-            return {"last_result": "TERMINATE", "last_reason": "Terminated by human at loop review."}
-
-        # Incorporate replan notes if present
         goal = state.get("loop_goal", "dummy research goal")
-        if decision.get("action") == "replan" and decision.get("notes"):
-            goal = f"{goal} [REVISED: {decision['notes']}]"
-            logger.info("[DummyPlugin] plan: replanning with notes: %s", decision["notes"])
 
         plan = {
             "loop_index": loop_index,
@@ -67,7 +54,6 @@ class DummyPlugin(ResearchPlugin):
             "loop_goal": goal,
             "implementation_plan": plan,
             "needs_human_approval": False,
-            "last_checkpoint_decision": None,
         }
 
     # -----------------------------------------------------------------------
@@ -114,10 +100,6 @@ class DummyPlugin(ResearchPlugin):
         attempt = state.get("attempt_count", 1)
         metrics = state.get("test_metrics", {})
 
-        if loop_index >= 6:
-            logger.info("[DummyPlugin] analyze: loop_index=%d >= 6, terminating.", loop_index)
-            return {"last_result": "TERMINATE", "last_reason": f"Reached max loops ({loop_index})."}
-
         # FAIL on first attempt, PASS on second
         if attempt < 2:
             reason = (
@@ -152,8 +134,6 @@ class DummyPlugin(ResearchPlugin):
         loop_index = state.get("loop_index", 0)
         metrics = state.get("test_metrics", {})
         new_loop_index = loop_index + 1
-        new_count = state.get("loop_count_since_review", 0) + 1
-
         summary = (
             f"## Loop {loop_index} Summary\n\n"
             f"- **Result**: PASS\n"
@@ -170,14 +150,10 @@ class DummyPlugin(ResearchPlugin):
 
         return {
             "loop_index": new_loop_index,
-            "loop_count_since_review": new_count,
             "last_reason": summary,
             "attempt_count": 0,
             "artifacts": state.get("artifacts", []) + [{"type": "summary", "path": artifact_path}],
         }
-
-    def get_review_interval(self) -> int:
-        return 3  # loop_review every 3 PASS loops
 
 
 # ---------------------------------------------------------------------------

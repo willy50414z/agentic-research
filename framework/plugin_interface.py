@@ -21,8 +21,7 @@ class ResearchPlugin(ABC):
 
     State keys used by the framework (do not clobber):
         project_id, loop_index, loop_goal, last_result, last_reason,
-        loop_count_since_review, last_checkpoint_decision,
-        needs_human_approval, artifacts
+        max_loops, attempt_index, needs_human_approval, artifacts
     """
 
     @property
@@ -39,10 +38,8 @@ class ResearchPlugin(ABC):
         """
         Generate an implementation plan for the current loop.
 
-        Reads:  loop_goal, last_checkpoint_decision (for replan notes)
+        Reads:  loop_goal
         Writes: implementation_plan (dict), needs_human_approval=True
-
-        If last_checkpoint_decision.action == "terminate", set last_result="TERMINATE".
         """
 
     @abstractmethod
@@ -146,6 +143,3 @@ class ResearchPlugin(ABC):
             "artifacts": artifacts + [{"type": "terminate_summary", "path": report_path}],
         }
 
-    def get_review_interval(self) -> int:
-        """Number of PASS loops between human review checkpoints. Default: 5."""
-        return 5

@@ -3,25 +3,28 @@ framework/graph.py
 
 Core LangGraph graph builder for the agentic research workflow.
 
-Graph flow (fully automatic except for loop_review):
+Graph flow:
     START → plan → implement → test → analyze
                                           │ FAIL → revise → implement
-                                          │ PASS → summarize → record_metrics
-                                          │           │ every N loops → notify_planka [INTERRUPT]
-                                          │           │ continue/replan → plan
-                                          │ TERMINATE → record_terminate_metrics → END
+                                          │ PASS → summarize → record_metrics → END
+                                          │ TERMINATE → record_terminate_metrics
+                                          │               → terminate_summarize
+                                          │               → final_summary → END
 
-Human-in-the-loop:
-    Only notify_planka calls interrupt() to wait for the loop-review decision.
-    Planning-column review (Phase 1 spec clarification) is handled externally
-    via Planka card position + spec.md edits — not via LangGraph interrupt.
+End conditions (handled by server.py after graph completes):
+    last_result == "PASS"      → card moves to Done
+    last_result == "TERMINATE" → card moves to Review (reason posted as Planka comment)
+    last_reason starts with "EXHAUSTED:" → max_loops exhausted, multi-loop summary uploaded
 
-Resume pattern (loop review only):
-    graph.invoke(Command(resume={"action": "continue"|"replan"|"terminate", "notes": "..."}), config)
+max_loops enforcement:
+    Framework analyze wrapper increments attempt_index after each analyze call.
+    If attempt_index >= max_loops and result != PASS → override to TERMINATE with
+    last_reason = "EXHAUSTED:<N> loops without meeting criteria."
 """
 
 import logging
 import os
+from datetime import datetime
 from typing import TypedDict, Optional
 
 import psycopg
@@ -43,14 +46,217 @@ class ResearchState(TypedDict):
     loop_goal: str
     spec: Optional[dict]                # full structured spec injected at start time
     implementation_plan: Optional[dict]
-    last_result: str                    # PASS | FAIL | TERMINATE | UNKNOWN
+    last_result: str                    # PASS | TERMINATE | UNKNOWN
     last_reason: str
-    loop_count_since_review: int
-    last_checkpoint_decision: Optional[dict]
+    max_loops: int                      # from Planka card custom field (default 3)
+    attempt_index: int                  # total analyze calls (incremented by framework wrapper)
     needs_human_approval: bool
     attempt_count: int                  # tracks revise→implement attempts within one loop
     test_metrics: dict                  # latest test result metrics (plugin-defined keys)
     artifacts: list                     # lightweight refs (local paths or MinIO keys)
+
+
+# ---------------------------------------------------------------------------
+# Framework wrappers
+# ---------------------------------------------------------------------------
+
+def _make_analyze_wrapper(analyze_fn):
+    """
+    Framework wrapper around plugin.analyze_node.
+    Increments attempt_index and enforces max_loops.
+    If attempt_index >= max_loops and result != PASS:
+        overrides last_result → "TERMINATE"
+        last_reason → "EXHAUSTED:<N> loops without meeting criteria."
+    """
+    def wrapped(state: dict) -> dict:
+        result = analyze_fn(state)
+        new_attempt = state.get("attempt_index", 0) + 1
+        max_loops = state.get("max_loops", 3)
+        updates = {**result, "attempt_index": new_attempt}
+        if updates.get("last_result") != "PASS" and new_attempt >= max_loops:
+            updates["last_result"] = "TERMINATE"
+            updates["last_reason"] = f"EXHAUSTED:{max_loops} loops without meeting criteria."
+        return updates
+    return wrapped
+
+
+def _make_summarize_wrapper(summarize_fn, sink):
+    """
+    Framework wrapper around plugin.summarize_node.
+    After each PASS loop: uploads the summary md to the Planka card as
+    v{attempt_index}_backtest_summary_{YYYYMMDDHHMM}.md and removes it from
+    artifacts (not tracked locally — lives in Planka).
+    """
+    def wrapped(state: dict) -> dict:
+        result = summarize_fn(state)
+        if sink is None:
+            return result
+
+        artifacts = (
+            result.get("artifacts")
+            if result.get("artifacts") is not None
+            else state.get("artifacts", [])
+        )
+        summary_art = next(
+            (a for a in reversed(artifacts) if a.get("type") == "summary"), None
+        )
+        if summary_art:
+            path = summary_art.get("path", "")
+            attempt = state.get("attempt_index", 0)  # already incremented by analyze wrapper
+            ts = datetime.now().strftime("%Y%m%d%H%M")
+            filename = f"v{attempt}_backtest_summary_{ts}.md"
+            try:
+                with open(path, encoding="utf-8") as f:
+                    content = f.read()
+                project_id = state.get("project_id", "")
+                card_id = sink.resolve_card_id(project_id)
+                if card_id:
+                    sink.upload_spec_attachment(card_id, filename, content)
+                    logger.info(
+                        "Uploaded per-loop report '%s' to Planka card '%s'.",
+                        filename, card_id,
+                    )
+            except Exception as e:
+                logger.warning("Per-loop Planka upload failed: %s", e)
+            # Remove from artifacts: the file lives in Planka, not tracked locally
+            cleaned = [a for a in artifacts if a is not summary_art]
+            result = {**result, "artifacts": cleaned}
+        return result
+    return wrapped
+
+
+def _make_final_summary_node(db_url: str, sink):
+    """
+    Framework node: generates a Chinese multi-loop summary report when max_loops exhausted.
+    Only active when last_reason starts with 'EXHAUSTED:'.
+    Uploads v1_vN_summary.md to the Planka card.
+    """
+    def node(state: dict) -> dict:
+        if not (state.get("last_reason") or "").startswith("EXHAUSTED:"):
+            return {}
+        project_id = state.get("project_id", "")
+        n = state.get("attempt_index", 0)
+        try:
+            from framework.db.queries import get_loop_metrics
+            rows = get_loop_metrics(project_id, db_url)
+
+            llm_fn = _try_build_llm_fn()
+            if llm_fn:
+                prompt = _build_final_summary_prompt(rows, n, state.get("loop_goal", ""))
+                try:
+                    report_md = llm_fn(prompt)
+                except Exception as e:
+                    logger.warning("LLM final summary call failed: %s — using fallback", e)
+                    report_md = _fallback_summary(rows, n, state.get("loop_goal", ""))
+            else:
+                report_md = _fallback_summary(rows, n, state.get("loop_goal", ""))
+
+            filename = f"v1_v{n}_summary.md"
+            card_id = sink.resolve_card_id(project_id) if sink else None
+            if card_id and sink:
+                sink.upload_spec_attachment(card_id, filename, report_md)
+                logger.info(
+                    "Uploaded final summary '%s' to Planka card '%s'.", filename, card_id
+                )
+        except Exception as e:
+            logger.warning("Final summary generation failed: %s", e)
+        return {}
+    return node
+
+
+def _try_build_llm_fn():
+    """Try to build an LLM callable from the LLM_CHAIN env var."""
+    try:
+        from framework.llm_providers import LLMProviderFactory
+        for provider in (os.getenv("LLM_CHAIN", "") or "").split(","):
+            provider = provider.strip()
+            if not provider:
+                continue
+            fn = LLMProviderFactory.build(provider)
+            if fn is not None:
+                return fn
+    except Exception:
+        pass
+    return None
+
+
+def _build_final_summary_prompt(rows: list[dict], n: int, goal: str) -> str:
+    rows_text = ""
+    for r in rows:
+        i = r.get("loop_index", 0) + 1
+        result = r.get("result", "UNKNOWN")
+        reason = r.get("reason", "")
+        wr = r.get("win_rate")
+        ar = r.get("alpha_ratio")
+        dd = r.get("max_drawdown")
+        metrics_str = (
+            f"win_rate={wr:.4f}, alpha_ratio={ar:.4f}, max_drawdown={dd:.4f}"
+            if wr is not None else "（無量化指標資料）"
+        )
+        rows_text += (
+            f"\n第 {i} 輪：result={result}, {metrics_str}\n  原因：{reason}\n"
+        )
+
+    return f"""你是量化策略研究助理，請根據以下多輪研究資料，用繁體中文產出一份完整的研究總結報告。
+
+研究目標：{goal}
+總執行輪數：{n}
+
+各輪資料：
+{rows_text}
+
+請按以下格式輸出 Markdown 報告（直接輸出報告內容，不要加任何前綴說明）：
+
+# 研究總結報告
+
+## 概述
+（整體 {n} 輪研究的結論摘要，說明是否達到研究目標）
+
+## 各輪詳情
+
+（對每一輪按以下格式輸出）
+
+### 第 N 輪
+- **測試目標**：本輪的具體策略目標或假設
+- **測試結果**：量化指標數據（win_rate、alpha_ratio、max_drawdown 等）
+- **結果判定**：PASS / FAIL / TERMINATE
+- **改善方向**：下一步建議的改進方向
+
+## 整體結論與建議下一步
+（綜合所有輪次的發現，給出明確的後續策略建議）
+"""
+
+
+def _fallback_summary(rows: list[dict], n: int, goal: str) -> str:
+    """Fallback plain-text summary when LLM is unavailable."""
+    lines = [
+        f"# 研究總結報告\n",
+        f"**研究目標**：{goal}",
+        f"**總執行輪數**：{n}\n",
+        "## 各輪詳情\n",
+    ]
+    for r in rows:
+        i = r.get("loop_index", 0) + 1
+        result = r.get("result", "UNKNOWN")
+        reason = r.get("reason", "")
+        wr = r.get("win_rate")
+        ar = r.get("alpha_ratio")
+        dd = r.get("max_drawdown")
+        metrics_line = (
+            f"win_rate={wr:.4f}, alpha_ratio={ar:.4f}, max_drawdown={dd:.4f}"
+            if wr is not None else "無量化指標"
+        )
+        lines += [
+            f"### 第 {i} 輪",
+            f"- **結果判定**：{result}",
+            f"- **測試結果**：{metrics_line}",
+            f"- **原因**：{reason}\n",
+        ]
+    lines += [
+        "## 建議下一步\n",
+        "請檢視各輪結果後調整策略參數，移回 Spec Pending Review 重新啟動。",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -64,24 +270,6 @@ def _analyze_router(state: ResearchState) -> str:
     if result == "TERMINATE":
         return "terminate"
     return "fail"
-
-
-def _after_review_router(state: ResearchState) -> str:
-    decision = state.get("last_checkpoint_decision") or {}
-    action = decision.get("action", "continue")
-    if action == "terminate":
-        return "terminate"
-    if action == "replan":
-        return "replan"
-    return "continue"
-
-
-def _make_loop_counter_router(review_interval: int):
-    def router(state: ResearchState) -> str:
-        if state.get("loop_count_since_review", 0) >= review_interval:
-            return "checkpoint"
-        return "continue"
-    return router
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +310,7 @@ def _make_record_metrics_node(db_url: str):
 def _make_record_terminate_metrics_node(db_url: str):
     """
     Framework node: writes loop_metrics when a loop terminates without PASS.
-    Runs on the TERMINATE path from analyze (before END), preserving the
-    current loop_index (summarize never ran, so it was not incremented).
+    Runs on the TERMINATE path from analyze (before terminate_summarize).
     """
     from .db.queries import record_loop_metrics
 
@@ -139,7 +326,10 @@ def _make_record_terminate_metrics_node(db_url: str):
                 metrics=state.get("test_metrics", {}),
                 db_url=db_url,
             )
-            logger.info("terminate_metrics recorded: project=%s loop=%d", state.get("project_id"), loop)
+            logger.info(
+                "terminate_metrics recorded: project=%s loop=%d",
+                state.get("project_id"), loop,
+            )
         except Exception as e:
             logger.warning("terminate_metrics write failed (non-blocking): %s", e)
         return {}
@@ -151,7 +341,6 @@ def _make_node_logger(node_name: str, node_fn, sink):
     """
     Wrap a plugin node function to post a Planka comment after each execution.
     If sink is None, returns node_fn unchanged (no-op).
-    GraphInterrupt (BaseException subclass) propagates naturally through except Exception.
     """
     if sink is None:
         return node_fn
@@ -161,7 +350,7 @@ def _make_node_logger(node_name: str, node_fn, sink):
         _post_node_comment(node_name, state, result or {}, sink)
         return result
 
-    wrapped.__name__ = node_fn.__name__
+    wrapped.__name__ = node_fn.__name__ if hasattr(node_fn, "__name__") else node_name
     return wrapped
 
 
@@ -189,17 +378,12 @@ def _post_node_comment(node_name: str, state: dict, result: dict, sink) -> None:
                 f"trades={m.get('n_trades', 0)}"
             )
     elif node_name == "analyze":
-        lines.append(f"result: {merged.get('last_result', '?')}")
+        lines.append(f"result: {merged.get('last_result', '?')} (attempt #{merged.get('attempt_index', '?')})")
         lines.append(str(merged.get("last_reason", ""))[:300])
     elif node_name in ("revise", "summarize", "terminate_summarize"):
         lines.append(str(merged.get("last_reason", ""))[:400])
     elif node_name in ("record_metrics", "record_terminate_metrics"):
         lines.append("loop metrics saved to DB")
-    elif node_name == "notify_planka":
-        decision = merged.get("last_checkpoint_decision") or {}
-        lines.append(f"review decision: {decision.get('action', '?')}")
-        if decision.get("notes"):
-            lines.append(str(decision["notes"])[:200])
 
     try:
         sink.post_comment(project_id, "\n".join(lines))
@@ -214,36 +398,32 @@ def build_graph(plugin: ResearchPlugin, config: dict):
     Args:
         plugin:  An instantiated ResearchPlugin.
         config:  Dict with keys:
-                   db_url (str)           — psycopg3 connection string
-                   review_interval (int)  — PASS loops between human reviews (default: plugin.get_review_interval())
-                   planka_sink            — PlankaSink instance (optional, for action logging)
+                   db_url (str)      — psycopg3 connection string
+                   planka_sink       — PlankaSink instance (optional)
 
     Returns:
         Compiled LangGraph graph with PostgresSaver checkpointer.
     """
-    from .notify import notify_planka_node
-
     db_url = config.get("db_url") or os.getenv("DATABASE_URL")
     if not db_url:
         raise ValueError("db_url must be provided in config or DATABASE_URL env var.")
 
-    review_interval = config.get("review_interval", plugin.get_review_interval())
-    sink = config.get("planka_sink")  # PlankaSink | None
+    sink = config.get("planka_sink")
 
     workflow = StateGraph(ResearchState)
 
-    # --- Nodes (wrapped with Planka comment logger when sink is available) ---
+    # --- Nodes ---
     W = lambda name, fn: _make_node_logger(name, fn, sink)  # noqa: E731
     workflow.add_node("plan",                     W("plan",                     plugin.plan_node))
     workflow.add_node("implement",                W("implement",                plugin.implement_node))
     workflow.add_node("test",                     W("test",                     plugin.test_node))
-    workflow.add_node("analyze",                  W("analyze",                  plugin.analyze_node))
+    workflow.add_node("analyze",                  W("analyze",                  _make_analyze_wrapper(plugin.analyze_node)))
     workflow.add_node("revise",                   W("revise",                   plugin.revise_node))
-    workflow.add_node("summarize",                W("summarize",                plugin.summarize_node))
+    workflow.add_node("summarize",                W("summarize",                _make_summarize_wrapper(plugin.summarize_node, sink)))
     workflow.add_node("terminate_summarize",      W("terminate_summarize",      plugin.terminate_summarize_node))
     workflow.add_node("record_metrics",           W("record_metrics",           _make_record_metrics_node(db_url)))
     workflow.add_node("record_terminate_metrics", W("record_terminate_metrics", _make_record_terminate_metrics_node(db_url)))
-    workflow.add_node("notify_planka",            notify_planka_node)
+    workflow.add_node("final_summary",            _make_final_summary_node(db_url, sink))
 
     # --- Edges ---
     workflow.add_edge(START, "plan")
@@ -257,33 +437,23 @@ def build_graph(plugin: ResearchPlugin, config: dict):
         {"fail": "revise", "pass": "summarize", "terminate": "record_terminate_metrics"},
     )
 
-    workflow.add_edge("record_terminate_metrics", "terminate_summarize")
-    workflow.add_edge("terminate_summarize", END)
+    # PASS path: summarize → record_metrics → END (first PASS ends immediately → Done)
     workflow.add_edge("revise", "implement")
     workflow.add_edge("summarize", "record_metrics")
+    workflow.add_edge("record_metrics", END)
 
-    workflow.add_conditional_edges(
-        "record_metrics",
-        _make_loop_counter_router(review_interval),
-        {"checkpoint": "notify_planka", "continue": "plan"},
-    )
-
-    workflow.add_conditional_edges(
-        "notify_planka",
-        _after_review_router,
-        {"terminate": END, "replan": "plan", "continue": "implement"},
-    )
+    # TERMINATE path: record → summarize → final_summary (Chinese report if EXHAUSTED) → END
+    workflow.add_edge("record_terminate_metrics", "terminate_summarize")
+    workflow.add_edge("terminate_summarize", "final_summary")
+    workflow.add_edge("final_summary", END)
 
     # --- Checkpointer ---
     conn = psycopg.connect(db_url, autocommit=True)
     checkpointer = PostgresSaver(conn)
-    checkpointer.setup()  # creates LangGraph's internal checkpoint tables if needed
+    checkpointer.setup()
 
     compiled = workflow.compile(checkpointer=checkpointer)
-    logger.info(
-        "Graph compiled for plugin '%s' (review_interval=%d).",
-        plugin.name, review_interval,
-    )
+    logger.info("Graph compiled for plugin '%s'.", plugin.name)
     return compiled
 
 

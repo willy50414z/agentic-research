@@ -11,11 +11,10 @@ Behaviour:
   - implement: "runs" the strategy on synthetic data; logs each sub-step
   - test:      evaluates win-rate / alpha; improves on retry
   - analyze:   FAIL on attempt 1 (win_rate too low), PASS on attempt 2
-               TERMINATE if loop_index >= 3
   - revise:    tightens the entry filter and logs exactly what changed
   - summarize: writes a markdown report to artifacts/
 
-review_interval = 2 so the loop-review checkpoint fires quickly.
+max_loops is enforced by the framework wrapper around analyze_node.
 """
 
 import logging
@@ -69,20 +68,7 @@ class DemoPlugin(ResearchPlugin):
         loop = state.get("loop_index", 0)
         _header("plan", loop)
 
-        decision = state.get("last_checkpoint_decision") or {}
-
-        # Propagate human terminate decision
-        if decision.get("action") == "terminate":
-            _step("Human decided: TERMINATE → routing to END")
-            return {"last_result": "TERMINATE", "last_reason": "Terminated by human at loop review."}
-
         goal = state.get("loop_goal", "find alpha in momentum strategies")
-
-        # Incorporate replan notes
-        if decision.get("action") == "replan" and decision.get("notes"):
-            goal = f"{goal}  [REVISED: {decision['notes']}]"
-            _step("Replan notes incorporated: %s", decision["notes"])
-
         strategy = _STRATEGIES[loop % len(_STRATEGIES)]
         plan = {
             "loop_index":  loop,
@@ -110,7 +96,6 @@ class DemoPlugin(ResearchPlugin):
             "loop_goal":            goal,
             "implementation_plan":  plan,
             "needs_human_approval": True,
-            "last_checkpoint_decision": None,
         }
 
     # ── implement ─────────────────────────────────────────────────────────────
@@ -215,13 +200,6 @@ class DemoPlugin(ResearchPlugin):
             _step("last_result already TERMINATE — propagating to END")
             return {"last_result": "TERMINATE", "last_reason": state.get("last_reason", "Terminated.")}
 
-        # Hard stop after 3 loops
-        if loop >= 3:
-            reason = f"Reached max loops ({loop}) → stopping."
-            _step("loop_index=%d ≥ 3 → TERMINATE", loop)
-            _result("→ TERMINATE")
-            return {"last_result": "TERMINATE", "last_reason": reason}
-
         win_rate = metrics.get("win_rate", 0)
         plan     = state.get("implementation_plan", {})
         threshold = plan.get("threshold", 0.55)
@@ -277,7 +255,6 @@ class DemoPlugin(ResearchPlugin):
         _header("summarize", loop)
 
         new_loop_index = loop + 1
-        new_count      = state.get("loop_count_since_review", 0) + 1
 
         summary = (
             f"# Loop {loop} Summary\n\n"
@@ -293,23 +270,17 @@ class DemoPlugin(ResearchPlugin):
         _step("alpha_ratio  = %.4f", metrics.get("alpha_ratio", 0))
         _step("max_drawdown = %.4f", metrics.get("max_drawdown", 0))
         _step("loop_index   : %d → %d", loop, new_loop_index)
-        _step("loops_since_review: %d → %d  (review_interval=%d)",
-              new_count - 1, new_count, self.get_review_interval())
 
         artifact_path = str(ARTIFACTS_DIR / f"loop_{loop}_summary.md")
         _write_artifact(artifact_path, summary)
         _result("Summary written → %s", artifact_path)
 
         return {
-            "loop_index":             new_loop_index,
-            "loop_count_since_review": new_count,
-            "last_reason":            summary,
-            "attempt_count":          0,
+            "loop_index":   new_loop_index,
+            "last_reason":  summary,
+            "attempt_count": 0,
             "artifacts": state.get("artifacts", []) + [{"type": "summary", "path": artifact_path}],
         }
-
-    def get_review_interval(self) -> int:
-        return 2   # loop review every 2 PASS loops (fires quickly for the demo)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

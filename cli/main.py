@@ -323,8 +323,7 @@ _PLANKA_LISTS = [
 ]
 
 _PLANKA_CUSTOM_FIELDS = [
-    ("review_interval", "number"),
-    ("max_loops",       "number"),
+    ("max_loops", "number"),
 ]
 
 

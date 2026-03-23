@@ -181,7 +181,7 @@ class PlankaSink:
         """
         Read custom field values for a specific card.
 
-        Returns dict like {"review_interval": 5, "max_loops": 30}.
+        Returns dict like {"max_loops": 3}.
         Reads from GET /api/boards/{boardId} customFields + customFieldItems.
         """
         try:
@@ -213,10 +213,10 @@ class PlankaSink:
         """
         Idempotently create required custom fields on the board.
 
-        Creates group 'Research Config' then fields: review_interval, max_loops.
+        Creates group 'Research Config' then field: max_loops.
         Called once at startup; safe to call repeatedly.
         """
-        required = ["review_interval", "max_loops"]
+        required = ["max_loops"]
         group_name = "Research Config"
         try:
             resp = httpx.get(

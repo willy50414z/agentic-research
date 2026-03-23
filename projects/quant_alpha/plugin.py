@@ -130,24 +130,15 @@ class QuantAlphaPlugin(ResearchPlugin):
     # ── plan ──────────────────────────────────────────────────────────────────
 
     def plan_node(self, state: dict) -> dict:
-        loop     = state.get("loop_index", 0)
-        goal     = state.get("loop_goal", "find alpha in momentum strategies")
-        decision = state.get("last_checkpoint_decision") or {}
+        loop = state.get("loop_index", 0)
+        goal = state.get("loop_goal", "find alpha in momentum strategies")
 
         logger.info("[QuantAlpha] plan  loop=%d", loop)
-
-        if decision.get("action") == "terminate":
-            return {"last_result": "TERMINATE", "last_reason": "Terminated by human."}
-
-        if decision.get("action") == "replan" and decision.get("notes"):
-            goal = f"{goal}  [REVISED: {decision['notes']}]"
-            if len(goal) > 500:
-                goal = goal[:497] + "..."
 
         prompt = _load_prompt("plan").format(
             goal=goal,
             loop_index=loop,
-            last_decision=json.dumps(decision) if decision else "none",
+            last_decision="none",
         )
 
         plan = {}
@@ -168,10 +159,9 @@ class QuantAlphaPlugin(ResearchPlugin):
         plan.setdefault("target_win_rate", _PASS_WIN_RATE)
 
         return {
-            "loop_goal":             goal,
-            "implementation_plan":   plan,
-            "needs_human_approval":  True,
-            "last_checkpoint_decision": None,
+            "loop_goal":            goal,
+            "implementation_plan":  plan,
+            "needs_human_approval": True,
         }
 
     # ── implement ─────────────────────────────────────────────────────────────
@@ -296,8 +286,6 @@ class QuantAlphaPlugin(ResearchPlugin):
         max_dd      = metrics.get("max_drawdown", 1)
         target_wr   = plan.get("target_win_rate", _PASS_WIN_RATE)
 
-        if loop >= 3:
-            return "TERMINATE", f"Reached max loops ({loop})."
         if win_rate >= target_wr and alpha_ratio >= _PASS_ALPHA and max_dd <= _PASS_MAX_DD:
             return "PASS", (
                 f"win_rate={win_rate:.4f} ≥ {target_wr}  "
@@ -382,7 +370,6 @@ class QuantAlphaPlugin(ResearchPlugin):
         logger.info("[QuantAlpha] summarize  loop=%d", loop)
 
         new_loop_index = loop + 1
-        new_count      = state.get("loop_count_since_review", 0) + 1
 
         prompt = _load_prompt("summarize").format(
             project_id    = state.get("project_id", "?"),
@@ -432,10 +419,9 @@ class QuantAlphaPlugin(ResearchPlugin):
         logger.info("[QuantAlpha] summarize  report → %s", artifact_path)
 
         return {
-            "loop_index":              new_loop_index,
-            "loop_count_since_review": new_count,
-            "last_reason":             summary,
-            "attempt_count":           0,
+            "loop_index":   new_loop_index,
+            "last_reason":  summary,
+            "attempt_count": 0,
             "artifacts": state.get("artifacts", []) + [
                 {"type": "summary", "path": artifact_path}
             ],
@@ -503,5 +489,3 @@ class QuantAlphaPlugin(ResearchPlugin):
             "artifacts": artifacts + [{"type": "terminate_summary", "path": artifact_path}],
         }
 
-    def get_review_interval(self) -> int:
-        return 3
