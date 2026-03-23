@@ -1,2 +1,0 @@
-[console_scripts]
-agentic-research = agentic_research.cli:app
