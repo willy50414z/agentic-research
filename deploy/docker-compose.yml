@@ -139,7 +139,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
       ARTIFACTS_DIR: /app/artifacts
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      PLANKA_API_URL: http://agentic-planka:1337
+      PLANKA_API_URL: ${PLANKA_INTERNAL_URL:-http://planka:1337}
       PLANKA_TOKEN: ${PLANKA_TOKEN:-}
       PLANKA_BOARD_ID: ${PLANKA_BOARD_ID:-}
       MINIO_ENDPOINT: http://minio:9000

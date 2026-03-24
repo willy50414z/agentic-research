@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-research"
-version = "0.3.1"
+version = "0.3.3"
 description = "Autonomous research workflow framework — Planka-driven, LangGraph-powered"
 readme = "README.md"
 license = { file = "LICENSE" }

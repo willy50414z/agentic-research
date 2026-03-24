@@ -360,7 +360,7 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
       Failed              → resume: action=terminate
     """
     payload = await request.json()
-    logger.info("Planka webhook raw payload: %s", payload)
+    # logger.info("Planka webhook raw payload: %s", payload)
 
     # Only process cardUpdate events (card moved to a column)
     event = payload.get("event", "")
