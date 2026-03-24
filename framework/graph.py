@@ -513,7 +513,14 @@ def build_graph(plugin: ResearchPlugin, config: dict):
     # --- Checkpointer ---
     conn = psycopg.connect(db_url, autocommit=True)
     checkpointer = PostgresSaver(conn)
-    checkpointer.setup()
+    try:
+        checkpointer.setup()
+    except Exception as e:
+        # setup() is not idempotent — UniqueViolation means tables already exist, safe to ignore
+        if "already exists" in str(e).lower() or "unique" in str(e).lower():
+            logger.debug("checkpointer.setup() skipped (tables already exist): %s", e)
+        else:
+            raise
 
     compiled = workflow.compile(checkpointer=checkpointer)
     logger.info("Graph compiled for plugin '%s'.", plugin.name)

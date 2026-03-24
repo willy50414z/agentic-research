@@ -1,4 +1,32 @@
+networks:
+  agentic-research_default:
+    name: agentic-research_default
+
 services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — shared by Planka + LangGraph checkpointer
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-research-postgres
+    restart: always
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agentic-research}
+      POSTGRES_USER: ${POSTGRES_USER:-agentic-postgres-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentic-postgres-pwd}
+    volumes:
+      - ${VOLUME_BASE_DIR:-../data}/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentic-postgres-user} -d ${POSTGRES_DB:-agentic-research}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentic-research_default
+
   # ---------------------------------------------------------------------------
   # MinIO — S3-compatible object storage
   # Planka attachments bucket: planka-attachments
@@ -23,6 +51,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - agentic-research_default
 
   minio-init:
     image: minio/mc:latest
@@ -40,9 +70,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agentic-minio-user}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
+    networks:
+      - agentic-research_default
 
   # ---------------------------------------------------------------------------
   # MLflow — 實驗追蹤 UI（可選）
+  # UI: http://localhost:5000
   # ---------------------------------------------------------------------------
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.20.2
@@ -58,69 +91,87 @@ services:
       --port 5000
       --backend-store-uri /mlflow/db
       --default-artifact-root /mlflow/artifacts
+    networks:
+      - agentic-research_default
 
+  # ---------------------------------------------------------------------------
+  # Planka — HITL kanban UI
+  # UI: http://localhost:7002
+  # ---------------------------------------------------------------------------
   planka:
     image: ghcr.io/plankanban/planka:latest
     container_name: agentic-planka
     restart: always
-    volumes:
-      - ${VOLUME_BASE_DIR:-../data}/user-avatars:/app/public/user-avatars
-      - ${VOLUME_BASE_DIR:-../data}/project-background-images:/app/public/project-background-images
-    ports:
-      - "7002:1337"
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
       SECRET_KEY: ${SECRET_KEY:-changeme-generate-with-openssl-rand-hex-32}
+      BASE_URL: ${BASE_URL:-http://localhost:7002}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-agentic@local.dev}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-agentic-planka-pwd}
+      DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME:-Agentic Admin}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-agentic-admin}
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: planka-attachments
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-agentic-minio-user}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
       S3_FORCE_PATH_STYLE: "true"
+    volumes:
+      - ${VOLUME_BASE_DIR:-../data}/user-avatars:/app/public/user-avatars
+      - ${VOLUME_BASE_DIR:-../data}/project-background-images:/app/public/project-background-images
+    ports:
+      - "7002:1337"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - agentic-research_default
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: agentic-research-postgres
-    restart: always
-    volumes:
-      - ${VOLUME_BASE_DIR:-../data}/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    env_file: .env
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentic-postgres-user} -d ${POSTGRES_DB:-agentic-research}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
+  # ---------------------------------------------------------------------------
   # LangGraph 流程引擎（從 source build，repo 根目錄掛載以支援 hot-reload）
-  langgraph-engine:
+  # API: http://localhost:7001
+  # ---------------------------------------------------------------------------
+  agentic-framework-api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    container_name: agentic-langgraph
+    container_name: agentic-framework-api
     restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     ports:
       - "7001:8000"
     volumes:
       - ..:/app
-      - ${LOCAL_CLAUDE_CONFIG_DIR}:${CLAUDE_CONFIG_DIR}
-      - ${LOCAL_GEMINI_CONFIG_DIR}:${GEMINI_CONFIG_DIR}
-      - ${LOCAL_CODEX_CONFIG_DIR}:${CODEX_CONFIG_DIR}
+      - ${LOCAL_CLAUDE_CONFIG_DIR:-~/.claude}:${CLAUDE_CONFIG_DIR:-/root/.claude}
+      - ${LOCAL_GEMINI_CONFIG_DIR:-~/.gemini}:${GEMINI_CONFIG_DIR:-/root/.gemini}
+      - ${LOCAL_CODEX_CONFIG_DIR:-~/.codex}:${CODEX_CONFIG_DIR:-/root/.codex}
     env_file: .env
     environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
+      ARTIFACTS_DIR: /app/artifacts
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # 明確覆蓋 .env 的 PLANKA_API_URL（.env 給 CLI 用的是 localhost，container 內要走 Docker 網路）
+      PLANKA_API_URL: ${PLANKA_INTERNAL_URL:-http://planka:1337}
+      PLANKA_TOKEN: ${PLANKA_TOKEN:-}
+      PLANKA_BOARD_ID: ${PLANKA_BOARD_ID:-}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-agentic-minio-user}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
+      MINIO_SECURE: "false"
       MINIO_ARTIFACTS_BUCKET: research-artifacts
+      LLM_CHAIN: ${LLM_CHAIN:-claude-cli}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LOCAL_LLM_ENDPOINT: ${LOCAL_LLM_ENDPOINT:-http://host.docker.internal:11434}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.2}
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - agentic-research_default

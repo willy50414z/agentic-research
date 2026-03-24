@@ -15,7 +15,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-agentic-postgres-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentic-postgres-pwd}
     volumes:
-      - ${VOLUME_BASE_DIR:-./data}/postgres:/var/lib/postgresql/data
+      - ${VOLUME_BASE_DIR:-../data}/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -28,6 +28,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # MinIO — S3-compatible object storage
+  # Planka attachments bucket: planka-attachments
+  # Research artifact bucket:  research-artifacts
   # Console: http://localhost:9001
   # ---------------------------------------------------------------------------
   minio:
@@ -42,7 +44,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agentic-minio-user}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
     volumes:
-      - ${VOLUME_BASE_DIR:-./data}/minio:/data
+      - ${VOLUME_BASE_DIR:-../data}/minio:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 30s
@@ -81,7 +83,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ${VOLUME_BASE_DIR:-./data}/mlflow:/mlflow
+      - ${VOLUME_BASE_DIR:-../data}/mlflow:/mlflow
     command: >
       mlflow server
       --host 0.0.0.0
@@ -114,8 +116,8 @@ services:
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
       S3_FORCE_PATH_STYLE: "true"
     volumes:
-      - ${VOLUME_BASE_DIR:-./data}/user-avatars:/app/public/user-avatars
-      - ${VOLUME_BASE_DIR:-./data}/project-background-images:/app/public/project-background-images
+      - ${VOLUME_BASE_DIR:-../data}/user-avatars:/app/public/user-avatars
+      - ${VOLUME_BASE_DIR:-../data}/project-background-images:/app/public/project-background-images
     ports:
       - "7002:1337"
     depends_on:
@@ -135,10 +137,15 @@ services:
     container_name: agentic-framework-api
     restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ${LOCAL_CLAUDE_CONFIG_DIR:-~/.claude}:${CLAUDE_CONFIG_DIR:-/root/.claude}
+      - ${LOCAL_GEMINI_CONFIG_DIR:-~/.gemini}:${GEMINI_CONFIG_DIR:-/root/.gemini}
+      - ${LOCAL_CODEX_CONFIG_DIR:-~/.codex}:${CODEX_CONFIG_DIR:-/root/.codex}
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
       ARTIFACTS_DIR: /app/artifacts
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # 明確覆蓋 .env 的 PLANKA_API_URL（.env 給 CLI 用的是 localhost，container 內要走 Docker 網路）
       PLANKA_API_URL: ${PLANKA_INTERNAL_URL:-http://planka:1337}
       PLANKA_TOKEN: ${PLANKA_TOKEN:-}
       PLANKA_BOARD_ID: ${PLANKA_BOARD_ID:-}
