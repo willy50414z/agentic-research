@@ -69,6 +69,38 @@ class LLMProviderFactory:
             logger.debug("Provider '%s' unavailable: %s", provider, e)
             return None
 
+    @staticmethod
+    def ping(provider: str, timeout: float = 20.0) -> bool:
+        """
+        Return True if *provider* is reachable and authenticated right now.
+
+        For CLI providers a tiny prompt is sent with a short timeout to catch
+        cases where the CLI is not logged in (which would otherwise block
+        indefinitely waiting for browser auth).
+        For API providers the check is instant (key presence only).
+        """
+        from framework.llm_agent.llm_target import LLMTarget
+
+        _CLI_TARGET: dict[str, LLMTarget] = {
+            "claude-cli":   LLMTarget.CLAUDE,
+            "gemini-cli":   LLMTarget.GEMINI,
+            "codex-cli":    LLMTarget.CODEX,
+            "opencode-cli": LLMTarget.OPENCODE,
+        }
+
+        try:
+            fn = LLMProviderFactory.build(provider)
+            if fn is None:
+                return False
+            target = _CLI_TARGET.get(provider)
+            if target is not None:
+                from framework.llm_agent.llm_svc import run_once
+                run_once(target, "ping", timeout=timeout)
+            return True
+        except Exception as e:
+            logger.info("Provider '%s' ping failed: %s", provider, e)
+            return False
+
     # ------------------------------------------------------------------
     # CLI providers — delegate to llm_svc.run_once for correct arg format
     # ------------------------------------------------------------------

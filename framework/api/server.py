@@ -195,10 +195,11 @@ def _run_spec_review_bg(
       1. Idempotency check (review_in_progress flag).
       2. Ensure thread_id in card description.
       3. Check for .md attachment — reject without it.
-      4. Primary LLM: rewrite spec.md, upload new version.
-      5. Secondary LLM: consistency review, upload final version.
-      6. Both pass → read custom fields, parse spec, upsert project, move to Verify, start graph.
-      7. Any issue → comment + move to Planning.
+      4. Ping each LLM provider — skip unavailable ones, abort if none reachable.
+      5. Primary LLM: rewrite spec.md, upload new version.
+      6. Secondary LLM: consistency review, upload final version.
+      7. Both pass → read custom fields, parse spec, upsert project, move to Verify, start graph.
+      8. Any issue → comment + move to Planning.
     """
     # --- 1. Idempotency ---
     existing = get_project(project_id, DATABASE_URL)
@@ -250,11 +251,27 @@ def _run_spec_review_bg(
             _move_planka_card(project_id, _COL_PLANNING)
             return
 
-        llm_chain = _build_llm_chain()
-        primary_fn = llm_chain[0][1] if llm_chain else None
+        # --- 5. Verify LLM providers are reachable (prevent indefinite hang) ---
+        from framework.llm_providers import LLMProviderFactory as _LPF
+        raw_chain = _build_llm_chain()
+        llm_chain = [(name, fn) for name, fn in raw_chain if _LPF.ping(name)]
+        if not llm_chain:
+            unavailable = ", ".join(name for name, _ in raw_chain) if raw_chain else "none configured"
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    f"**LLM unavailable** — could not reach any provider in the chain "
+                    f"(`{unavailable}`).\n\n"
+                    "Please ensure the LLM CLI is installed and logged in, or the API key is set, "
+                    "then move the card back to **Spec Pending Review** to retry.",
+                )
+            _clear_review_flag(project_id)
+            _move_planka_card(project_id, _COL_PLANNING)
+            return
+        primary_fn = llm_chain[0][1]
         secondary_fn = llm_chain[1][1] if len(llm_chain) > 1 else primary_fn
 
-        # --- 5. Primary LLM: rewrite spec ---
+        # --- 6. Primary LLM: rewrite spec ---
         result1 = run_spec_agent(spec_md, llm_fn=primary_fn, role="primary")
         if _planka_sink:
             _planka_sink.upload_spec_attachment(card_id, "spec.md", result1.enhanced_spec_md)
@@ -271,7 +288,7 @@ def _run_spec_review_bg(
             _move_planka_card(project_id, _COL_PLANNING)
             return
 
-        # --- 6. Secondary LLM: consistency review ---
+        # --- 7. Secondary LLM: consistency review ---
         result2 = run_spec_agent(result1.enhanced_spec_md, llm_fn=secondary_fn, role="secondary")
         if _planka_sink:
             _planka_sink.upload_spec_attachment(card_id, "spec.md", result2.enhanced_spec_md)
@@ -288,7 +305,7 @@ def _run_spec_review_bg(
             _move_planka_card(project_id, _COL_PLANNING)
             return
 
-        # --- 7. Both passed → read custom fields, parse, start ---
+        # --- 8. Both passed → read custom fields, parse, start ---
         custom_fields = (
             _planka_sink.read_card_custom_fields(card_id) if _planka_sink else {}
         )

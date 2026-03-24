@@ -490,7 +490,7 @@ def _init_planka_board(dest: Path) -> None:
     # ── 6. Create webhook ────────────────────────────────────────────────────
     # Default: internal Docker service name so Planka can reach the engine.
     default_webhook_url = env.get(
-        "FRAMEWORK_WEBHOOK_URL", "http://langgraph-engine:8000/planka-webhook"
+        "FRAMEWORK_WEBHOOK_URL", "http://agentic-framework-api:8000/planka-webhook"
     )
     webhook_url = _ask_str("  Webhook URL (Planka→Framework)", default=default_webhook_url)
 
