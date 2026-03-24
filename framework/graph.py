@@ -14,12 +14,14 @@ Graph flow:
 End conditions (handled by server.py after graph completes):
     last_result == "PASS"      → card moves to Done
     last_result == "TERMINATE" → card moves to Review (reason posted as Planka comment)
-    last_reason starts with "EXHAUSTED:" → max_loops exhausted, multi-loop summary uploaded
+                                  v{attempt_index}_researchsummary_{ts}.md uploaded per loop
+                                  v1_v{n}_researchsummary_{ts}.md final summary uploaded
 
 max_loops enforcement:
     Framework analyze wrapper increments attempt_index after each analyze call.
     If attempt_index >= max_loops and result != PASS → override to TERMINATE with
     last_reason = "EXHAUSTED:<N> loops without meeting criteria."
+    FAIL loop metrics are recorded to DB after each FAIL analyze call.
 """
 
 import logging
@@ -60,15 +62,18 @@ class ResearchState(TypedDict):
 # Framework wrappers
 # ---------------------------------------------------------------------------
 
-def _make_analyze_wrapper(analyze_fn):
+def _make_analyze_wrapper(analyze_fn, db_url: str = None):
     """
     Framework wrapper around plugin.analyze_node.
     Increments attempt_index and enforces max_loops.
-    If attempt_index >= max_loops and result != PASS:
+    - Records FAIL loop metrics to DB (per loop, not just terminal TERMINATE).
+    - If attempt_index >= max_loops and result != PASS:
         overrides last_result → "TERMINATE"
         last_reason → "EXHAUSTED:<N> loops without meeting criteria."
     """
     def wrapped(state: dict) -> dict:
+        # Track if TERMINATE was already set before analyze runs (plan rejection / revise decision)
+        pre_terminate = state.get("last_result") == "TERMINATE"
         result = analyze_fn(state)
         new_attempt = state.get("attempt_index", 0) + 1
         max_loops = state.get("max_loops", 3)
@@ -76,6 +81,25 @@ def _make_analyze_wrapper(analyze_fn):
         if updates.get("last_result") != "PASS" and new_attempt >= max_loops:
             updates["last_result"] = "TERMINATE"
             updates["last_reason"] = f"EXHAUSTED:{max_loops} loops without meeting criteria."
+        elif (updates.get("last_result") == "TERMINATE" and not pre_terminate
+              and new_attempt < max_loops):
+            # LLM chose TERMINATE early — override to FAIL so max_loops cycles are completed
+            updates["last_result"] = "FAIL"
+        # Record metrics for FAIL loops so get_loop_metrics has complete history
+        if updates.get("last_result") == "FAIL" and db_url:
+            try:
+                from .db.queries import record_loop_metrics
+                record_loop_metrics(
+                    project_id=state.get("project_id", ""),
+                    loop_index=new_attempt,
+                    result="FAIL",
+                    reason=updates.get("last_reason", ""),
+                    report_path=None,
+                    metrics=state.get("test_metrics", {}),
+                    db_url=db_url,
+                )
+            except Exception as e:
+                logger.warning("FAIL loop_metrics write failed (non-blocking): %s", e)
         return updates
     return wrapped
 
@@ -84,7 +108,7 @@ def _make_summarize_wrapper(summarize_fn, sink):
     """
     Framework wrapper around plugin.summarize_node.
     After each PASS loop: uploads the summary md to the Planka card as
-    v{attempt_index}_backtest_summary_{YYYYMMDDHHMM}.md and removes it from
+    v{attempt_index}_researchsummary_{YYYYMMDDHHMM}.md and removes it from
     artifacts (not tracked locally — lives in Planka).
     """
     def wrapped(state: dict) -> dict:
@@ -104,7 +128,7 @@ def _make_summarize_wrapper(summarize_fn, sink):
             path = summary_art.get("path", "")
             attempt = state.get("attempt_index", 0)  # already incremented by analyze wrapper
             ts = datetime.now().strftime("%Y%m%d%H%M")
-            filename = f"v{attempt}_backtest_summary_{ts}.md"
+            filename = f"v{attempt}_researchsummary_{ts}.md"
             try:
                 with open(path, encoding="utf-8") as f:
                     content = f.read()
@@ -125,15 +149,54 @@ def _make_summarize_wrapper(summarize_fn, sink):
     return wrapped
 
 
+def _make_terminate_summarize_wrapper(terminate_summarize_fn, sink):
+    """
+    Framework wrapper around plugin.terminate_summarize_node.
+    After TERMINATE: uploads the terminate report md to the Planka card as
+    v{attempt_index}_researchsummary_{YYYYMMDDHHMM}.md.
+    """
+    def wrapped(state: dict) -> dict:
+        result = terminate_summarize_fn(state)
+        if sink is None:
+            return result
+
+        artifacts = (
+            result.get("artifacts")
+            if result.get("artifacts") is not None
+            else state.get("artifacts", [])
+        )
+        term_art = next(
+            (a for a in reversed(artifacts) if a.get("type") == "terminate_summary"), None
+        )
+        if term_art:
+            path = term_art.get("path", "")
+            attempt = state.get("attempt_index", 0)
+            ts = datetime.now().strftime("%Y%m%d%H%M")
+            filename = f"v{attempt}_researchsummary_{ts}.md"
+            try:
+                with open(path, encoding="utf-8") as f:
+                    content = f.read()
+                project_id = state.get("project_id", "")
+                card_id = sink.resolve_card_id(project_id)
+                if card_id:
+                    sink.upload_spec_attachment(card_id, filename, content)
+                    logger.info(
+                        "Uploaded terminate report '%s' to Planka card '%s'.",
+                        filename, card_id,
+                    )
+            except Exception as e:
+                logger.warning("Terminate report Planka upload failed: %s", e)
+        return result
+    return wrapped
+
+
 def _make_final_summary_node(db_url: str, sink):
     """
-    Framework node: generates a Chinese multi-loop summary report when max_loops exhausted.
-    Only active when last_reason starts with 'EXHAUSTED:'.
-    Uploads v1_vN_summary.md to the Planka card.
+    Framework node: generates a Chinese multi-loop summary report on TERMINATE.
+    Runs for ALL TERMINATE cases (not just EXHAUSTED).
+    Uploads v1_vN_researchsummary_{YYYYMMDDHHMM}.md to the Planka card.
     """
     def node(state: dict) -> dict:
-        if not (state.get("last_reason") or "").startswith("EXHAUSTED:"):
-            return {}
         project_id = state.get("project_id", "")
         n = state.get("attempt_index", 0)
         try:
@@ -151,7 +214,8 @@ def _make_final_summary_node(db_url: str, sink):
             else:
                 report_md = _fallback_summary(rows, n, state.get("loop_goal", ""))
 
-            filename = f"v1_v{n}_summary.md"
+            ts = datetime.now().strftime("%Y%m%d%H%M")
+            filename = f"v1_v{n}_researchsummary_{ts}.md"
             card_id = sink.resolve_card_id(project_id) if sink else None
             if card_id and sink:
                 sink.upload_spec_attachment(card_id, filename, report_md)
@@ -183,7 +247,7 @@ def _try_build_llm_fn():
 def _build_final_summary_prompt(rows: list[dict], n: int, goal: str) -> str:
     rows_text = ""
     for r in rows:
-        i = r.get("loop_index", 0) + 1
+        i = r.get("loop_index", 1)  # loop_index is 1-based (attempt_index)
         result = r.get("result", "UNKNOWN")
         reason = r.get("reason", "")
         wr = r.get("win_rate")
@@ -236,7 +300,7 @@ def _fallback_summary(rows: list[dict], n: int, goal: str) -> str:
         "## 各輪詳情\n",
     ]
     for r in rows:
-        i = r.get("loop_index", 0) + 1
+        i = r.get("loop_index", 1)  # loop_index is 1-based (attempt_index)
         result = r.get("result", "UNKNOWN")
         reason = r.get("reason", "")
         wr = r.get("win_rate")
@@ -279,17 +343,16 @@ def _analyze_router(state: ResearchState) -> str:
 def _make_record_metrics_node(db_url: str):
     """
     Framework node: writes loop_metrics after every PASS.
-    Runs after summarize_node, which already incremented loop_index,
-    so completed loop = loop_index - 1.
+    Uses attempt_index (1-based) as the loop_index key for consistency with FAIL/TERMINATE rows.
     """
     from .db.queries import record_loop_metrics
 
     def record_metrics_node(state: dict) -> dict:
-        completed_loop = state.get("loop_index", 1) - 1
+        attempt = state.get("attempt_index", 0)  # already incremented by analyze wrapper
         try:
             record_loop_metrics(
                 project_id=state.get("project_id", ""),
-                loop_index=completed_loop,
+                loop_index=attempt,
                 result=state.get("last_result", "PASS"),
                 reason=state.get("last_reason", ""),
                 report_path=next(
@@ -315,11 +378,11 @@ def _make_record_terminate_metrics_node(db_url: str):
     from .db.queries import record_loop_metrics
 
     def record_terminate_metrics_node(state: dict) -> dict:
-        loop = state.get("loop_index", 0)
+        attempt = state.get("attempt_index", 0)  # already incremented by analyze wrapper
         try:
             record_loop_metrics(
                 project_id=state.get("project_id", ""),
-                loop_index=loop,
+                loop_index=attempt,
                 result=state.get("last_result", "TERMINATE"),
                 reason=state.get("last_reason", ""),
                 report_path=None,
@@ -327,8 +390,8 @@ def _make_record_terminate_metrics_node(db_url: str):
                 db_url=db_url,
             )
             logger.info(
-                "terminate_metrics recorded: project=%s loop=%d",
-                state.get("project_id"), loop,
+                "terminate_metrics recorded: project=%s attempt=%d",
+                state.get("project_id"), attempt,
             )
         except Exception as e:
             logger.warning("terminate_metrics write failed (non-blocking): %s", e)
@@ -417,10 +480,10 @@ def build_graph(plugin: ResearchPlugin, config: dict):
     workflow.add_node("plan",                     W("plan",                     plugin.plan_node))
     workflow.add_node("implement",                W("implement",                plugin.implement_node))
     workflow.add_node("test",                     W("test",                     plugin.test_node))
-    workflow.add_node("analyze",                  W("analyze",                  _make_analyze_wrapper(plugin.analyze_node)))
+    workflow.add_node("analyze",                  W("analyze",                  _make_analyze_wrapper(plugin.analyze_node, db_url)))
     workflow.add_node("revise",                   W("revise",                   plugin.revise_node))
     workflow.add_node("summarize",                W("summarize",                _make_summarize_wrapper(plugin.summarize_node, sink)))
-    workflow.add_node("terminate_summarize",      W("terminate_summarize",      plugin.terminate_summarize_node))
+    workflow.add_node("terminate_summarize",      W("terminate_summarize",      _make_terminate_summarize_wrapper(plugin.terminate_summarize_node, sink)))
     workflow.add_node("record_metrics",           W("record_metrics",           _make_record_metrics_node(db_url)))
     workflow.add_node("record_terminate_metrics", W("record_terminate_metrics", _make_record_terminate_metrics_node(db_url)))
     workflow.add_node("final_summary",            _make_final_summary_node(db_url, sink))

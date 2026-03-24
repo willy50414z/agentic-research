@@ -7,8 +7,7 @@ Failed strategy:
 Failure reason: {reason}
 Attempt number: {attempt_count}
 
-If attempt_count >= 3, output TERMINATE — the strategy is not salvageable.
-Otherwise, adjust parameters to address the failure reason:
+Adjust parameters to address the failure reason:
   - Low win_rate     → tighten entry threshold or shorten lookback
   - Low alpha_ratio  → increase lookback or loosen stop-loss
   - High drawdown    → tighten stop_loss_pct

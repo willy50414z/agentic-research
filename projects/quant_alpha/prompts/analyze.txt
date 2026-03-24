@@ -14,9 +14,6 @@ Pass criteria (ALL must be met):
   - alpha_ratio  >= 1.0
   - max_drawdown <= 0.20
 
-Terminate if loop_index >= 3.
-Loop index: {loop_index}
-
 Output EXACTLY in this format — no extra text outside the tags:
 
 <RESULT>PASS</RESULT>     ← or FAIL or TERMINATE

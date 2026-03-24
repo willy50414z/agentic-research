@@ -102,6 +102,7 @@ services:
   # LangGraph 流程引擎（從 source build，repo 根目錄掛載以支援 hot-reload）
   langgraph-engine:
     build:
+      context: ..
       dockerfile: deploy/Dockerfile
     container_name: agentic-langgraph
     restart: unless-stopped
