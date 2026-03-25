@@ -32,6 +32,13 @@ class PlankaSink:
         self._board_id = board_id
         self._db_url = db_url
         self._cache: dict[str, str] = {}  # project_id → card_id
+        logger.info(
+            "PlankaSink init: url=%r  board_id=%r  token_set=%s",
+            self._url,
+            self._board_id,
+            bool(self._token),
+        )
+        self._check_connectivity()
 
     # ------------------------------------------------------------------
     # Public API
@@ -78,16 +85,21 @@ class PlankaSink:
         if not card_id:
             logger.debug("post_comment: no card found for project '%s', skipping.", project_id)
             return
+        url = f"{self._url}/api/cards/{card_id}/comments"
+        logger.debug("post_comment → POST %s", url)
         try:
             resp = httpx.post(
-                f"{self._url}/api/cards/{card_id}/comments",
+                url,
                 headers={"Authorization": f"Bearer {self._token}"},
                 json={"text": text},
                 timeout=10,
             )
             resp.raise_for_status()
         except Exception as e:
-            logger.warning("Planka post_comment failed (project '%s'): %s", project_id, e)
+            logger.warning(
+                "Planka post_comment failed (project '%s'): url=%r  %s(%s)",
+                project_id, url, type(e).__name__, e,
+            )
 
     def update_card_description(self, project_id: str, description: str) -> None:
         """
@@ -99,16 +111,21 @@ class PlankaSink:
         if not card_id:
             logger.debug("update_card_description: no card found for project '%s', skipping.", project_id)
             return
+        url = f"{self._url}/api/cards/{card_id}"
+        logger.debug("update_card_description → PATCH %s", url)
         try:
             resp = httpx.patch(
-                f"{self._url}/api/cards/{card_id}",
+                url,
                 headers={"Authorization": f"Bearer {self._token}"},
                 json={"description": description},
                 timeout=10,
             )
             resp.raise_for_status()
         except Exception as e:
-            logger.warning("Planka update_card_description failed (project '%s'): %s", project_id, e)
+            logger.warning(
+                "Planka update_card_description failed (project '%s'): url=%r  %s(%s)",
+                project_id, url, type(e).__name__, e,
+            )
 
     def cache_card_id(self, project_id: str, card_id: str) -> None:
         """Persist card_id to in-memory cache and DB."""
@@ -128,9 +145,11 @@ class PlankaSink:
         Returns the attachment text content, or None if no .md attachment found.
         Non-blocking: returns None on any error.
         """
+        url = f"{self._url}/api/cards/{card_id}"
+        logger.debug("download_latest_spec_attachment → GET %s", url)
         try:
             resp = httpx.get(
-                f"{self._url}/api/cards/{card_id}",
+                url,
                 headers={"Authorization": f"Bearer {self._token}"},
                 timeout=10,
             )
@@ -141,6 +160,10 @@ class PlankaSink:
                 if (a.get("name") or "").lower().endswith(".md")
             ]
             if not md_attachments:
+                logger.debug(
+                    "download_latest_spec_attachment: no .md attachments on card '%s' (total attachments: %d)",
+                    card_id, len(attachments),
+                )
                 return None
             # Sort by createdAt descending, pick latest
             latest = sorted(
@@ -150,9 +173,13 @@ class PlankaSink:
             )[0]
             att_id = latest.get("id", "")
             att_name = latest.get("name", "spec.md")
+            logger.debug("download_latest_spec_attachment: found '%s' (id=%s)", att_name, att_id)
             return _download_planka_attachment_via_minio(att_id, att_name, self._db_url)
         except Exception as e:
-            logger.warning("download_latest_spec_attachment failed for card '%s': %s", card_id, e)
+            logger.warning(
+                "download_latest_spec_attachment failed for card '%s': url=%r  %s(%s)",
+                card_id, url, type(e).__name__, e,
+            )
             return None
 
     def upload_spec_attachment(self, card_id: str, filename: str, content: str) -> None:
@@ -267,6 +294,19 @@ class PlankaSink:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _check_connectivity(self) -> None:
+        """Probe Planka at startup and log the result. Never raises."""
+        try:
+            resp = httpx.get(f"{self._url}/api/health", timeout=5)
+            logger.info("Planka connectivity check: url=%r status=%s", self._url, resp.status_code)
+        except Exception as e:
+            logger.warning(
+                "Planka connectivity check FAILED: url=%r  error=%s(%s)",
+                self._url,
+                type(e).__name__,
+                e,
+            )
 
     def _scan_board_for_card(self, project_id: str) -> str | None:
         """Fetch full board data and find the card whose description contains thread_id: <project_id>."""
