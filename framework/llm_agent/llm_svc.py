@@ -21,6 +21,7 @@ Raises:
 """
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -48,6 +49,19 @@ def _resolve_cli(command_name: str) -> str:
     resolved = shutil.which(command_name)
     return resolved if resolved else command_name
 
+def ping(target: LLMTarget):
+    if LLMTarget.CLAUDE:
+        completed = subprocess.run(
+            "claude auth status",
+            capture_output=True,
+            text=True
+        )
+        return "\"loggedIn\": true" in completed.stdout
+    else:
+        logging.warn(f"{target.name} ping login has not setting")
+        return False
+
+
 
 def run_once(
     target: LLMTarget,
@@ -55,7 +69,7 @@ def run_once(
     *,
     model: str | None = None,
     cwd: str | None = None,
-    timeout: float | None = 300,
+    timeout: float | None = 1800,
     encoding: str = "utf-8",
 ) -> str:
     """
@@ -116,15 +130,18 @@ def run_once(
         env.setdefault("XDG_DATA_HOME",   str(runtime_root / "data"))
         env.setdefault("XDG_STATE_HOME",  str(runtime_root / "state"))
 
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding=encoding,
-        cwd=work_dir,
-        env=env,
-        timeout=timeout,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding=encoding,
+            cwd=work_dir,
+            env=env,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logging.error("execute cmd exception", e)
 
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()

@@ -26,6 +26,8 @@ import os
 import logging
 from typing import Callable
 
+from framework.llm_agent.llm_svc import ping
+
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS: list[str] = [
@@ -95,7 +97,10 @@ class LLMProviderFactory:
             target = _CLI_TARGET.get(provider)
             if target is not None:
                 from framework.llm_agent.llm_svc import run_once
-                run_once(target, "ping", timeout=timeout)
+                if provider == "claude-cli":
+                    ping(target)
+                else:
+                    run_once(target, "ping", timeout=timeout)
             return True
         except Exception as e:
             logger.info("Provider '%s' ping failed: %s", provider, e)

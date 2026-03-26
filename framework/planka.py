@@ -52,7 +52,7 @@ class PlankaSink:
         Returns None if not found; never raises.
         """
         # 1. In-memory cache
-        if project_id in self._cache:
+        if project_id in self._cache and self._cache[project_id]:
             return self._cache[project_id]
 
         # 2. DB lookup
@@ -385,8 +385,8 @@ def _download_planka_attachment_via_minio(
         endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
         client = Minio(
             endpoint,
-            access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
-            secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+            access_key=os.getenv("MINIO_ROOT_USER", "minioadmin"),
+            secret_key=os.getenv("MINIO_ROOT_PASSWORD", "minioadmin"),
             secure=False,
         )
         key = f"private/attachments/{uploaded_file_id}/{att_name}"

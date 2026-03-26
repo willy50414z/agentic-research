@@ -31,18 +31,33 @@ import re
 import time
 
 import httpx
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, BackgroundTasks
 from langgraph.types import Command
 
 from framework.db.queries import create_project, get_project
-from framework.db.connection import run_migration
 from framework.plugin_registry import resolve as resolve_plugin
 from framework.graph import get_or_build_graph
-from framework.spec_clarifier import run_spec_agent, parse_spec_md
+from framework.spec_clarifier import run_spec_agent, parse_spec_md, SpecAgentResult
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Agentic Research API", version="0.4.0")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    global _planka_sink
+    _ensure_planka_columns()
+    if PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID:
+        from framework.planka import PlankaSink
+        _planka_sink = PlankaSink(PLANKA_URL, PLANKA_TOKEN, PLANKA_BOARD_ID, DATABASE_URL)
+        _planka_sink.ensure_custom_fields()
+        logger.info("PlankaSink initialized with custom fields.")
+    task = asyncio.create_task(_scheduler_loop())
+    logger.info("Scheduler started.")
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Agentic Research API", version="0.4.0", lifespan=_lifespan)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 PLANKA_URL = os.getenv("PLANKA_API_URL", "")
@@ -207,10 +222,25 @@ def _run_spec_review_bg(
     logger.info("[spec-review] step 1/8  idempotency check ...")
     existing = get_project(project_id, DATABASE_URL)
     if existing and (existing.get("config") or {}).get("review_in_progress"):
-        logger.info(
-            "[spec-review] SKIP   review already in progress for '%s'.", project_id
-        )
-        return
+        started_at = (existing.get("config") or {}).get("review_started_at") or 0
+        age_seconds = time.time() - started_at
+        if age_seconds < 300:
+            # Genuinely running — clear flag and move card to Planning so user can retry
+            logger.warning(
+                "[spec-review] SKIP   review already in progress for '%s' (started %.0fs ago). "
+                "Clearing flag and moving card to Planning.",
+                project_id, age_seconds,
+            )
+            _clear_review_flag(project_id)
+            _move_planka_card(project_id, _COL_PLANNING)
+            return
+        else:
+            # Stale flag from a crash — clear and proceed
+            logger.warning(
+                "[spec-review] stale review_in_progress for '%s' (%.0fs old), clearing and retrying.",
+                project_id, age_seconds,
+            )
+            _clear_review_flag(project_id)
 
     try:
         # --- 2. Cache card_id first (needed for all subsequent Planka calls) ---
@@ -259,19 +289,19 @@ def _run_spec_review_bg(
         logger.info("[spec-review]          spec.md downloaded (%d chars).", len(spec_md))
 
         # --- 5. Verify LLM providers are reachable (prevent indefinite hang) ---
-        logger.info("[spec-review] step 4/8  pinging LLM providers (timeout=20s each) ...")
-        from framework.llm_providers import LLMProviderFactory as _LPF
-        raw_chain = _build_llm_chain()
-        llm_chain = []
-        for name, fn in raw_chain:
-            logger.info("[spec-review]          pinging '%s' ...", name)
-            if _LPF.ping(name):
-                logger.info("[spec-review]          '%s' OK", name)
-                llm_chain.append((name, fn))
-            else:
-                logger.warning("[spec-review]          '%s' unreachable, skipping.", name)
+        # logger.info("[spec-review] step 4/8  pinging LLM providers (timeout=20s each) ...")
+        # from framework.llm_providers import LLMProviderFactory as _LPF
+        llm_chain = _build_llm_chain()
+        # llm_chain = []
+        # for name, fn in raw_chain:
+        #     logger.info("[spec-review]          pinging '%s' ...", name)
+        #     if _LPF.ping(name):
+        #         logger.info("[spec-review]          '%s' OK", name)
+        #         llm_chain.append((name, fn))
+        #     else:
+        #         logger.warning("[spec-review]          '%s' unreachable, skipping.", name)
         if not llm_chain:
-            unavailable = ", ".join(name for name, _ in raw_chain) if raw_chain else "none configured"
+            unavailable = ", ".join(name for name, _ in llm_chain) if llm_chain else "none configured"
             logger.error("[spec-review] ABORT  no reachable LLM provider. chain=%s", unavailable)
             if _planka_sink:
                 _planka_sink.post_comment(
@@ -293,12 +323,16 @@ def _run_spec_review_bg(
 
         # --- 6. Primary LLM: rewrite spec ---
         logger.info("[spec-review] step 5/8  primary LLM ('%s') rewriting spec ...", primary_name)
-        result1 = run_spec_agent(spec_md, llm_fn=primary_fn, role="primary")
-        logger.info(
-            "[spec-review]          primary done. needs_user_input=%s", result1.needs_user_input
-        )
-        if _planka_sink:
-            _planka_sink.upload_spec_attachment(card_id, "spec.md", result1.enhanced_spec_md)
+        try:
+            result1 = run_spec_agent(spec_md, llm_fn=primary_fn, role="primary")
+            logger.info(
+                "[spec-review]          primary done. needs_user_input=%s", result1.needs_user_input
+            )
+            if _planka_sink:
+                _planka_sink.upload_spec_attachment(card_id, "spec.md", result1.enhanced_spec_md)
+        except Exception as e:
+            logger.error(f"run primary llm review md fail", e)
+            result1 = SpecAgentResult(True, [f"run primary llm review md fail,exception[{e}]"], "", "", "")
 
         if result1.needs_user_input:
             logger.info("[spec-review] PAUSE  primary requests clarification, moving to Planning.")
@@ -548,34 +582,6 @@ async def _scan_stalled_reviews() -> None:
         logger.warning("_scan_stalled_reviews error: %s", e)
 
 
-@app.on_event("startup")
-async def startup_event():
-    global _planka_sink
-    _run_migrations()
-    _ensure_planka_columns()
-    if PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID:
-        from framework.planka import PlankaSink
-        _planka_sink = PlankaSink(PLANKA_URL, PLANKA_TOKEN, PLANKA_BOARD_ID, DATABASE_URL)
-        _planka_sink.ensure_custom_fields()
-        logger.info("PlankaSink initialized with custom fields.")
-    asyncio.create_task(_scheduler_loop())
-    logger.info("Scheduler started.")
-
-
-def _run_migrations() -> None:
-    import pathlib
-    migrations_dir = pathlib.Path(__file__).parent.parent.parent / "db" / "migrations"
-    if not migrations_dir.exists():
-        logger.warning("Migrations directory not found: %s", migrations_dir)
-        return
-    for sql_file in sorted(migrations_dir.glob("*.sql")):
-        try:
-            run_migration(str(sql_file))
-            logger.info("Migration applied: %s", sql_file.name)
-        except Exception as e:
-            logger.error("Migration failed (%s): %s", sql_file.name, e)
-            raise
-
 
 # ---------------------------------------------------------------------------
 # Planka helpers
@@ -627,24 +633,44 @@ def _move_planka_card(project_id: str, column_name: str) -> None:
             if lst.get("name") == column_name:
                 target_list_id = lst.get("id")
 
-        # Try cached card_id first (avoids needing thread_id in description)
+        # Build a set of valid card IDs on the board for stale-cache detection
+        board_card_ids = {c.get("id") for c in cards}
+
+        # Try cached card_id first, but verify it still exists on the board
         if _planka_sink:
-            card_id = _planka_sink.resolve_card_id(project_id)
+            cached = _planka_sink.resolve_card_id(project_id)
+            if cached and cached in board_card_ids:
+                card_id = cached
+            elif cached:
+                logger.warning(
+                    "_move_planka_card: cached card_id '%s' not found on board, clearing cache.",
+                    cached,
+                )
+                _planka_sink._cache.pop(project_id, None)
+
+        # Fall back to board scan by thread_id in description
         if not card_id:
             for card in cards:
                 if _extract_thread_id(card.get("description") or "") == project_id:
                     card_id = card.get("id")
+                    break
 
         if card_id and target_list_id:
             if _planka_sink:
                 _planka_sink.cache_card_id(project_id, card_id)
-            httpx.patch(
+            patch_resp = httpx.patch(
                 f"{PLANKA_URL}/api/cards/{card_id}",
                 headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
                 json={"listId": target_list_id, "position": 65535},
                 timeout=10,
             )
-            logger.info("Moved Planka card for project '%s' to '%s'.", project_id, column_name)
+            if patch_resp.is_success:
+                logger.info("Moved Planka card for project '%s' to '%s'.", project_id, column_name)
+            else:
+                logger.warning(
+                    "Planka PATCH card failed for project '%s': card_id=%s status=%s body=%s",
+                    project_id, card_id, patch_resp.status_code, patch_resp.text[:200],
+                )
         elif not card_id:
             logger.warning("No Planka card found for project '%s'.", project_id)
         elif not target_list_id:

@@ -158,8 +158,8 @@ services:
       PLANKA_TOKEN: ${PLANKA_TOKEN:-}
       PLANKA_BOARD_ID: ${PLANKA_BOARD_ID:-}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-agentic-minio-user}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agentic-minio-user}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agentic-minio-pwd}
       MINIO_SECURE: "false"
       MINIO_ARTIFACTS_BUCKET: research-artifacts
       LLM_CHAIN: ${LLM_CHAIN:-claude-cli}
