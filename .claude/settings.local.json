@@ -1,20 +1,14 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(find /e/Code/agentic-research -name *.py -o -name *.json -o -name *.toml)",
-      "Bash(find /e/Code/agentic-research -type d ! -path ./.git/* ! -path ./.idea/*)",
-      "Bash(docker exec:*)",
-      "Bash(docker compose:*)",
-      "Bash(docker build:*)",
-      "Bash(docker rm:*)",
-      "Bash(docker ps:*)",
-      "Bash(source venv/Scripts/activate)",
-      "Bash(agentic-research --version)",
-      "Bash(python -m agentic_research --version)",
-      "Bash(grep:*)",
-      "Bash(FRAMEWORK_IMAGE=agentic-research:latest docker compose -f docker/docker-compose.global.yml up -d --no-deps framework-api)",
-      "Bash(curl -s http://localhost:7002/api/config)",
-      "Bash(curl:*)"
-    ]
-  }
-}
+      "permissions": {
+        "allow": [
+          "Bash(*)",
+          "Edit(*)",
+          "Write(*)",
+          "Read(*)",
+          "Glob(*)",
+          "Grep(*)",
+          "MultiEdit(*)"
+        ],
+        "deny": []
+      }
+    }

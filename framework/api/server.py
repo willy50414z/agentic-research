@@ -269,8 +269,8 @@ def _run_spec_review_bg(
 
         # --- 4. Check for .md attachment — required ---
         logger.info("[spec-review] step 3/8  downloading spec.md attachment ...")
-        spec_md = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
-        if not spec_md:
+        spec_path = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
+        if not spec_path:
             logger.warning("[spec-review] ABORT  no spec.md attachment found for card '%s'.", card_name)
             if _planka_sink:
                 _planka_sink.post_comment(
@@ -286,20 +286,9 @@ def _run_spec_review_bg(
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
-        logger.info("[spec-review]          spec.md downloaded (%d chars).", len(spec_md))
+        logger.info("[spec-review]          spec.md saved to %s", spec_path)
 
-        # --- 5. Verify LLM providers are reachable (prevent indefinite hang) ---
-        # logger.info("[spec-review] step 4/8  pinging LLM providers (timeout=20s each) ...")
-        # from framework.llm_providers import LLMProviderFactory as _LPF
         llm_chain = _build_llm_chain()
-        # llm_chain = []
-        # for name, fn in raw_chain:
-        #     logger.info("[spec-review]          pinging '%s' ...", name)
-        #     if _LPF.ping(name):
-        #         logger.info("[spec-review]          '%s' OK", name)
-        #         llm_chain.append((name, fn))
-        #     else:
-        #         logger.warning("[spec-review]          '%s' unreachable, skipping.", name)
         if not llm_chain:
             unavailable = ", ".join(name for name, _ in llm_chain) if llm_chain else "none configured"
             logger.error("[spec-review] ABORT  no reachable LLM provider. chain=%s", unavailable)
@@ -324,50 +313,66 @@ def _run_spec_review_bg(
         # --- 6. Primary LLM: rewrite spec ---
         logger.info("[spec-review] step 5/8  primary LLM ('%s') rewriting spec ...", primary_name)
         try:
-            result1 = run_spec_agent(spec_md, llm_fn=primary_fn, role="primary")
+            result1 = run_spec_agent(spec_path, llm_fn=primary_fn, role="primary")
             logger.info(
                 "[spec-review]          primary done. needs_user_input=%s", result1.needs_user_input
             )
-            if _planka_sink:
-                _planka_sink.upload_spec_attachment(card_id, "spec.md", result1.enhanced_spec_md)
         except Exception as e:
-            logger.error(f"run primary llm review md fail", e)
-            result1 = SpecAgentResult(True, [f"run primary llm review md fail,exception[{e}]"], "", "", "")
+            logger.exception("[spec-review] primary LLM failed: %s", e)
+            _post_error_and_move_planning(project_id, "Primary LLM", e)
+            _clear_review_flag(project_id)
+            return
 
         if result1.needs_user_input:
             logger.info("[spec-review] PAUSE  primary requests clarification, moving to Planning.")
             if _planka_sink:
-                _planka_sink.post_comment(
-                    project_id,
-                    "**Spec Agent — Clarification Needed**\n\n"
-                    + "\n".join(f"- {q}" for q in result1.questions)
-                    + (f"\n\n_{result1.agent_notes}_" if result1.agent_notes else ""),
-                )
+                body = "**Spec Agent — Clarification Needed**\n\n"
+                if result1.questions:
+                    body += "\n".join(f"- {q}" for q in result1.questions)
+                if result1.agent_notes:
+                    body += f"\n\n_{result1.agent_notes}_"
+                _planka_sink.post_comment(project_id, body)
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
 
+        # Primary passed — upload the reviewed spec
+        if _planka_sink and result1.enhanced_spec_md:
+            _planka_sink.upload_spec_attachment(card_id, "reviewed_spec_primary.md", result1.enhanced_spec_md)
+
         # --- 7. Secondary LLM: consistency review ---
         logger.info("[spec-review] step 6/8  secondary LLM ('%s') consistency review ...", secondary_name)
-        result2 = run_spec_agent(result1.enhanced_spec_md, llm_fn=secondary_fn, role="secondary")
-        logger.info(
-            "[spec-review]          secondary done. needs_user_input=%s", result2.needs_user_input
-        )
-        if _planka_sink:
-            _planka_sink.upload_spec_attachment(card_id, "spec.md", result2.enhanced_spec_md)
+        reviewed_spec_path = os.path.join(os.path.dirname(spec_path), "reviewed_spec_primary.md")
+        if not os.path.exists(reviewed_spec_path):
+            logger.warning("[spec-review] reviewed_spec_primary.md not found, using original spec for secondary.")
+            reviewed_spec_path = spec_path
+        try:
+            result2 = run_spec_agent(reviewed_spec_path, llm_fn=secondary_fn, role="secondary")
+            logger.info(
+                "[spec-review]          secondary done. needs_user_input=%s", result2.needs_user_input
+            )
+        except Exception as e:
+            logger.exception("[spec-review] secondary LLM failed: %s", e)
+            _post_error_and_move_planning(project_id, "Secondary LLM", e)
+            _clear_review_flag(project_id)
+            return
 
         if result2.needs_user_input:
             logger.info("[spec-review] PAUSE  secondary found issues, moving to Planning.")
             if _planka_sink:
-                _planka_sink.post_comment(
-                    project_id,
-                    "**Spec Agent (Secondary Review) — Issues Found**\n\n"
-                    + "\n".join(f"- {q}" for q in result2.questions)
-                    + (f"\n\n_{result2.agent_notes}_" if result2.agent_notes else ""),
-                )
+                body = "**Spec Agent (Secondary Review) — Issues Found**\n\n"
+                if result2.questions:
+                    body += "\n".join(f"- {q}" for q in result2.questions)
+                if result2.agent_notes:
+                    body += f"\n\n_{result2.agent_notes}_"
+                _planka_sink.post_comment(project_id, body)
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
+
+        # Secondary passed — upload the final reviewed spec
+        if _planka_sink and result2.enhanced_spec_md:
+            _planka_sink.upload_spec_attachment(card_id, "reviewed_spec_secondary.md", result2.enhanced_spec_md)
 
         # --- 8. Both passed → read custom fields, parse, start ---
         logger.info("[spec-review] step 7/8  both LLMs passed — reading custom fields & parsing spec ...")
@@ -408,12 +413,21 @@ def _run_spec_review_bg(
     except Exception as e:
         logger.exception("[spec-review] ERROR  card='%s' unhandled exception: %s", card_name, e)
         _clear_review_flag(project_id)
-        if _planka_sink:
-            _planka_sink.post_comment(
-                project_id,
-                f"Spec review error: {e}\nCard moved to Failed.",
-            )
-        _move_planka_card(project_id, _COL_FAILED)
+        _post_error_and_move_planning(project_id, "Spec review", e)
+
+
+def _post_error_and_move_planning(project_id: str, stage: str, exc: Exception) -> None:
+    """Post an error comment on the card and move it to Planning so the user can act."""
+    import traceback
+    detail = traceback.format_exc()[-1500:]  # last 1500 chars to stay within comment limits
+    if _planka_sink:
+        _planka_sink.post_comment(
+            project_id,
+            f"**{stage} error — moved to Planning**\n\n"
+            f"```\n{exc}\n```\n\n"
+            f"<details><summary>Traceback</summary>\n\n```\n{detail}\n```\n</details>",
+        )
+    _move_planka_card(project_id, _COL_PLANNING)
 
 
 def _clear_review_flag(project_id: str) -> None:
@@ -612,69 +626,82 @@ def _get_latest_card_comment(card_id: str) -> str:
 
 
 def _move_planka_card(project_id: str, column_name: str) -> None:
-    """Move existing Planka card (identified by thread_id) to a named column."""
-    if not (PLANKA_URL and PLANKA_TOKEN and PLANKA_BOARD_ID):
+    """Move existing Planka card (identified by thread_id) to a named column.
+
+    Strategy:
+    1. If card_id is cached, fetch the card to get its boardId, then look up lists
+       in that board — avoids hardcoded PLANKA_BOARD_ID mismatch.
+    2. If no cache, fall back to scanning PLANKA_BOARD_ID (original behaviour).
+    """
+    if not (PLANKA_URL and PLANKA_TOKEN):
         return
+    headers = {"Authorization": f"Bearer {PLANKA_TOKEN}"}
     try:
-        resp = httpx.get(
-            f"{PLANKA_URL}/api/boards/{PLANKA_BOARD_ID}",
-            headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        lists = data.get("included", {}).get("lists") or []
-        cards = data.get("included", {}).get("cards") or []
+        card_id: str | None = None
+        board_id: str | None = None
 
-        target_list_id = None
-        card_id = None
-
-        for lst in lists:
-            if lst.get("name") == column_name:
-                target_list_id = lst.get("id")
-
-        # Build a set of valid card IDs on the board for stale-cache detection
-        board_card_ids = {c.get("id") for c in cards}
-
-        # Try cached card_id first, but verify it still exists on the board
+        # --- Step 1: resolve card_id from cache ---
         if _planka_sink:
-            cached = _planka_sink.resolve_card_id(project_id)
-            if cached and cached in board_card_ids:
-                card_id = cached
-            elif cached:
-                logger.warning(
-                    "_move_planka_card: cached card_id '%s' not found on board, clearing cache.",
-                    cached,
-                )
-                _planka_sink._cache.pop(project_id, None)
+            card_id = _planka_sink.resolve_card_id(project_id)
 
-        # Fall back to board scan by thread_id in description
-        if not card_id:
-            for card in cards:
-                if _extract_thread_id(card.get("description") or "") == project_id:
-                    card_id = card.get("id")
-                    break
-
-        if card_id and target_list_id:
-            if _planka_sink:
-                _planka_sink.cache_card_id(project_id, card_id)
-            patch_resp = httpx.patch(
-                f"{PLANKA_URL}/api/cards/{card_id}",
-                headers={"Authorization": f"Bearer {PLANKA_TOKEN}"},
-                json={"listId": target_list_id, "position": 65535},
-                timeout=10,
-            )
-            if patch_resp.is_success:
-                logger.info("Moved Planka card for project '%s' to '%s'.", project_id, column_name)
+        # --- Step 2: resolve board_id from the card itself ---
+        if card_id:
+            card_resp = httpx.get(f"{PLANKA_URL}/api/cards/{card_id}", headers=headers, timeout=10)
+            if card_resp.is_success:
+                board_id = card_resp.json().get("item", {}).get("boardId")
             else:
                 logger.warning(
-                    "Planka PATCH card failed for project '%s': card_id=%s status=%s body=%s",
-                    project_id, card_id, patch_resp.status_code, patch_resp.text[:200],
+                    "_move_planka_card: could not fetch card '%s' (status %s), clearing cache.",
+                    card_id, card_resp.status_code,
                 )
-        elif not card_id:
+                if _planka_sink:
+                    _planka_sink._cache.pop(project_id, None)
+                card_id = None
+
+        # --- Step 3: fall back to configured board scan if still no card ---
+        if not card_id:
+            board_id = PLANKA_BOARD_ID
+            if not board_id:
+                logger.warning("No Planka card found for project '%s' and PLANKA_BOARD_ID not set.", project_id)
+                return
+            board_resp = httpx.get(f"{PLANKA_URL}/api/boards/{board_id}", headers=headers, timeout=10)
+            board_resp.raise_for_status()
+            board_data = board_resp.json()
+            for card in (board_data.get("included", {}).get("cards") or []):
+                if _extract_thread_id(card.get("description") or "") == project_id:
+                    card_id = card.get("id")
+                    if _planka_sink:
+                        _planka_sink.cache_card_id(project_id, card_id)
+                    break
+
+        if not card_id:
             logger.warning("No Planka card found for project '%s'.", project_id)
-        elif not target_list_id:
-            logger.warning("Planka column '%s' not found.", column_name)
+            return
+
+        # --- Step 4: look up target list on the resolved board ---
+        board_resp = httpx.get(f"{PLANKA_URL}/api/boards/{board_id}", headers=headers, timeout=10)
+        board_resp.raise_for_status()
+        lists = board_resp.json().get("included", {}).get("lists") or []
+        target_list_id = next((l.get("id") for l in lists if l.get("name") == column_name), None)
+
+        if not target_list_id:
+            logger.warning("Planka column '%s' not found on board '%s'.", column_name, board_id)
+            return
+
+        # --- Step 5: move the card ---
+        patch_resp = httpx.patch(
+            f"{PLANKA_URL}/api/cards/{card_id}",
+            headers=headers,
+            json={"listId": target_list_id, "position": 65535},
+            timeout=10,
+        )
+        if patch_resp.is_success:
+            logger.info("Moved Planka card for project '%s' to '%s'.", project_id, column_name)
+        else:
+            logger.warning(
+                "Planka PATCH card failed for project '%s': card_id=%s status=%s body=%s",
+                project_id, card_id, patch_resp.status_code, patch_resp.text[:200],
+            )
     except Exception as e:
         logger.warning("Could not move Planka card for project '%s': %s", project_id, e)
 

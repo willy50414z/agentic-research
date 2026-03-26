@@ -1,0 +1,3 @@
+experimental_use_rmcp_client = true
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

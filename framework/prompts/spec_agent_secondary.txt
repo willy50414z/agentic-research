@@ -1,45 +1,17 @@
-You are reviewing a research specification written by a primary AI agent.
-Your role: EXECUTABILITY and LOGICAL CONSISTENCY review.
+你是研究規格審查 agent（第二輪：Secondary Review）。
 
-## Your Job
+任務：
+1. 讀取 `{RULES_PATH}`，了解審查規則。
+2. 讀取位於 `{SPEC_PATH}` 的 `reviewed_spec_primary.md`（由 Primary Review 產出）。
+3. 依照以下重點進行二次複查：
+   - **具體性**：進出場訊號是否具體到可直接轉為程式碼？（例：RSI(14) < 30，非「使用 RSI 背離」）
+   - **一致性**：績效門檻是否互相合理？（例：win_rate=0.8 與 max_drawdown=0.5 不能並存）
+   - **資料可行性**：訓練期間至少 1 年、測試期間至少 6 個月且不與訓練期重疊。
+   - **Plugin 對應**：plugin 欄位是否與研究類型一致。
+4. 若發現可自行修正的小問題，直接修正並在 `## 假設說明` 或 `## Agent Notes` 中記錄。
+5. 產出以下檔案到 `{OUTPUT_DIR}`：
+   - `reviewed_spec_secondary.md`：最終完整的規格文件（含二次修正與審查說明）。
+   - `status_pass.txt`（空檔）：規格完整、無待釐清問題且無不可化解的矛盾。
+   - `status_need_update.txt`：發現無法自行化解的根本矛盾時建立，每行一個問題。
 
-Read the spec carefully and check:
-
-1. **Specificity** — Are entry/exit signals specific enough to implement directly in code?
-   - Bad: "use RSI divergence"
-   - Good: "RSI(14) < 30 AND current bar closes above previous bar high"
-
-2. **Consistency** — Are performance thresholds internally consistent?
-   - Bad: min win_rate=0.8 AND max_drawdown=0.5 (these can't coexist in normal markets)
-   - Check: profit factor vs win rate vs drawdown make sense together
-
-3. **Data feasibility** — Are the specified periods realistic and sufficient?
-   - Training period should be at least 1 year
-   - Test period should be at least 6 months and NOT overlap with training
-
-4. **Plugin match** — Does the plugin field match the research type?
-
-## Output
-
-If you find minor issues: fix them directly in the spec, document in Agent Notes.
-If you find fundamental contradictions that you cannot resolve: set needs_user_input: true.
-
-Output the full revised spec.md followed immediately by:
-
-<!-- AGENT_META
-needs_user_input: false
-domain: <domain>
-questions: []
-agent_notes: <what you reviewed, what you fixed, what looks good>
--->
-
-Set `needs_user_input: true` and populate `questions` list only for irreconcilable contradictions:
-
-<!-- AGENT_META
-needs_user_input: true
-domain: <domain>
-questions:
-  - "<specific question 1>"
-  - "<specific question 2>"
-agent_notes: <what issue you found>
--->
+`status_pass.txt` 與 `status_need_update.txt` 二擇一，不可同時建立。

@@ -137,12 +137,13 @@ class PlankaSink:
 
     def download_latest_spec_attachment(self, card_id: str) -> str | None:
         """
-        Download the most recently uploaded .md attachment from a card.
+        Download the most recently uploaded .md attachment from a card and save it locally.
 
         Uses GET /api/cards/{cardId} → included.attachments, picks latest by createdAt.
         Downloads via MinIO (Planka's /attachments/ endpoint doesn't accept Bearer token
         auth — it only uses cookie sessions; MinIO gives direct S3 access).
-        Returns the attachment text content, or None if no .md attachment found.
+        Saves the file to ${VOLUME_BASE_DIR}/{timestamp}/<filename> and returns the local path.
+        Returns None if no .md attachment found or on any error.
         Non-blocking: returns None on any error.
         """
         url = f"{self._url}/api/cards/{card_id}"
@@ -158,6 +159,7 @@ class PlankaSink:
             md_attachments = [
                 a for a in attachments
                 if (a.get("name") or "").lower().endswith(".md")
+                and not (a.get("name") or "").lower().startswith("reviewed_spec")
             ]
             if not md_attachments:
                 logger.debug(
@@ -174,7 +176,10 @@ class PlankaSink:
             att_id = latest.get("id", "")
             att_name = latest.get("name", "spec.md")
             logger.debug("download_latest_spec_attachment: found '%s' (id=%s)", att_name, att_id)
-            return _download_planka_attachment_via_minio(att_id, att_name, self._db_url)
+            save_path = _make_volume_path(att_name)
+            if save_path is None:
+                return None
+            return _download_planka_attachment_via_minio(att_id, att_name, self._db_url, save_path)
         except Exception as e:
             logger.warning(
                 "download_latest_spec_attachment failed for card '%s': url=%r  %s(%s)",
@@ -350,17 +355,35 @@ def _extract_thread_id(description: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _make_volume_path(filename: str) -> str | None:
+    """
+    Build ${VOLUME_BASE_DIR}/{timestamp}/{filename}, create the directory, and return the path.
+    Returns None on failure.
+    """
+    import os, time
+    volume_base = os.getenv("VOLUME_BASE_DIR", "./data")
+    save_dir = os.path.join(volume_base, str(int(time.time())))
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        return os.path.join(save_dir, filename)
+    except Exception as e:
+        logger.warning("_make_volume_path failed for '%s': %s", filename, e)
+        return None
+
+
 def _download_planka_attachment_via_minio(
     att_id: str,
     att_name: str,
     db_url: str | None,
+    save_path: str,
 ) -> str | None:
     """
-    Download a Planka attachment via MinIO.
+    Download a Planka attachment via MinIO directly to save_path.
 
     Planka stores files in the 'planka-attachments' bucket under
     'private/attachments/{uploadedFileId}/{filename}'.
     The uploadedFileId is read from the shared Planka DB (attachment.data->>'uploadedFileId').
+    Returns save_path on success, None on failure.
     """
     try:
         from framework.db.connection import get_connection
@@ -380,7 +403,7 @@ def _download_planka_attachment_via_minio(
         return None
 
     try:
-        import io, os
+        import os
         from minio import Minio
         endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
         client = Minio(
@@ -391,13 +414,9 @@ def _download_planka_attachment_via_minio(
         )
         key = f"private/attachments/{uploaded_file_id}/{att_name}"
         bucket = "planka-attachments"
-        response = client.get_object(bucket, key)
-        try:
-            content = response.read().decode("utf-8", errors="replace")
-        finally:
-            response.close()
-            response.release_conn()
-        return content
+        client.fget_object(bucket, key, save_path)
+        logger.info("MinIO fget_object: saved '%s' → %s", att_name, save_path)
+        return save_path
     except Exception as e:
         logger.warning("MinIO download failed for attachment '%s': %s", att_id, e)
         return None

@@ -71,40 +71,6 @@ class LLMProviderFactory:
             logger.debug("Provider '%s' unavailable: %s", provider, e)
             return None
 
-    @staticmethod
-    def ping(provider: str, timeout: float = 20.0) -> bool:
-        """
-        Return True if *provider* is reachable and authenticated right now.
-
-        For CLI providers a tiny prompt is sent with a short timeout to catch
-        cases where the CLI is not logged in (which would otherwise block
-        indefinitely waiting for browser auth).
-        For API providers the check is instant (key presence only).
-        """
-        from framework.llm_agent.llm_target import LLMTarget
-
-        _CLI_TARGET: dict[str, LLMTarget] = {
-            "claude-cli":   LLMTarget.CLAUDE,
-            "gemini-cli":   LLMTarget.GEMINI,
-            "codex-cli":    LLMTarget.CODEX,
-            "opencode-cli": LLMTarget.OPENCODE,
-        }
-
-        try:
-            fn = LLMProviderFactory.build(provider)
-            if fn is None:
-                return False
-            target = _CLI_TARGET.get(provider)
-            if target is not None:
-                from framework.llm_agent.llm_svc import run_once
-                if provider == "claude-cli":
-                    ping(target)
-                else:
-                    run_once(target, "ping", timeout=timeout)
-            return True
-        except Exception as e:
-            logger.info("Provider '%s' ping failed: %s", provider, e)
-            return False
 
     # ------------------------------------------------------------------
     # CLI providers — delegate to llm_svc.run_once for correct arg format
@@ -115,8 +81,8 @@ class LLMProviderFactory:
         from framework.llm_agent.llm_svc import run_once
         from framework.llm_agent.llm_target import LLMTarget
 
-        def _fn(prompt: str) -> str:
-            return run_once(LLMTarget.CLAUDE, prompt)
+        def _fn(prompt: str, **kwargs) -> str:
+            return run_once(LLMTarget.CLAUDE, prompt, **kwargs)
 
         return _fn
 
@@ -125,8 +91,8 @@ class LLMProviderFactory:
         from framework.llm_agent.llm_svc import run_once
         from framework.llm_agent.llm_target import LLMTarget
 
-        def _fn(prompt: str) -> str:
-            return run_once(LLMTarget.CODEX, prompt)
+        def _fn(prompt: str, **kwargs) -> str:
+            return run_once(LLMTarget.CODEX, prompt, **kwargs)
 
         return _fn
 
@@ -148,7 +114,7 @@ class LLMProviderFactory:
             return None
         model = os.getenv("CODEX_MODEL", "codex-mini-latest")
 
-        def _fn(prompt: str) -> str:
+        def _fn(prompt: str, **kwargs) -> str:
             r = httpx.post(
                 f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -169,8 +135,8 @@ class LLMProviderFactory:
         from framework.llm_agent.llm_svc import run_once
         from framework.llm_agent.llm_target import LLMTarget
 
-        def _fn(prompt: str) -> str:
-            return run_once(LLMTarget.OPENCODE, prompt)
+        def _fn(prompt: str, **kwargs) -> str:
+            return run_once(LLMTarget.OPENCODE, prompt, **kwargs)
 
         return _fn
 
@@ -179,8 +145,8 @@ class LLMProviderFactory:
         from framework.llm_agent.llm_svc import run_once
         from framework.llm_agent.llm_target import LLMTarget
 
-        def _fn(prompt: str) -> str:
-            return run_once(LLMTarget.GEMINI, prompt)
+        def _fn(prompt: str, **kwargs) -> str:
+            return run_once(LLMTarget.GEMINI, prompt, **kwargs)
 
         return _fn
 
@@ -199,7 +165,7 @@ class LLMProviderFactory:
         model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
         client = anthropic.Anthropic(api_key=api_key)
 
-        def _fn(prompt: str) -> str:
+        def _fn(prompt: str, **kwargs) -> str:
             msg = client.messages.create(
                 model=model,
                 max_tokens=4096,
@@ -224,7 +190,7 @@ class LLMProviderFactory:
         api_key  = os.getenv("OPENCODE_API_KEY", "opencode")
         model    = os.getenv("OPENCODE_MODEL", "llama3.2")
 
-        def _fn(prompt: str) -> str:
+        def _fn(prompt: str, **kwargs) -> str:
             r = httpx.post(
                 f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -252,7 +218,7 @@ class LLMProviderFactory:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
 
-        def _fn(prompt: str) -> str:
+        def _fn(prompt: str, **kwargs) -> str:
             return model.generate_content(prompt).text
 
         return _fn

@@ -4,12 +4,16 @@ framework/spec_clarifier.py
 Dual-LLM spec-writing agent for the Planka-first workflow.
 
 Flow:
-  1. Primary agent downloads spec.md, rewrites it with full domain detail, uploads new version.
-  2. Secondary agent reviews for executability/consistency, uploads final version.
-  3. Framework parses final spec.md with regex to extract structured fields.
+  1. Primary agent reads spec.md and .ai/rules/spec-review.md from cwd, writes
+     reviewed_spec.md and a status file (status_pass.txt or status_need_update.txt).
+  2. Secondary agent repeats the same protocol on the primary's output.
+  3. Framework detects outcome by checking which status file exists in work_dir.
+  4. Framework parses final reviewed_spec.md with regex to extract structured fields.
 
-LLM output format: pure markdown spec.md + <!-- AGENT_META ... --> block at the end.
-Framework parses metadata from the HTML comment block — LLM never outputs JSON.
+Status detection:
+  status_pass.txt present      → needs_user_input = False
+  status_need_update.txt present → needs_user_input = True; questions from file lines
+  neither present              → fallback to _parse_agent_response on stdout text
 """
 
 import logging
@@ -20,6 +24,7 @@ from pathlib import Path
 from typing import Callable
 
 logger = logging.getLogger(__name__)
+logger.warning("spec_clarifier v2 loaded from %s", __file__)
 
 
 # ---------------------------------------------------------------------------
@@ -40,47 +45,126 @@ class SpecAgentResult:
 # ---------------------------------------------------------------------------
 
 def run_spec_agent(
-    spec_md: str,
+    spec_path: str,
     llm_fn: Callable[[str], str] | None,
     role: str = "primary",
 ) -> SpecAgentResult:
     """
-    Run a spec-writing agent (primary or secondary) against spec_md.
+    Run a spec-writing agent (primary or secondary) against a local spec.md file.
 
     Args:
-        spec_md:  Current spec.md content (raw markdown string).
-        llm_fn:   Callable(prompt: str) -> str.  If None, returns conservative fallback.
-        role:     "primary" or "secondary" — selects prompt template.
+        spec_path: Local path to the spec.md file.
+        llm_fn:    Callable(prompt: str) -> str.  If None, returns conservative fallback.
+        role:      "primary" or "secondary" — selects prompt template.
 
     Returns:
         SpecAgentResult with enhanced_spec_md (metadata block stripped) and parsed metadata.
     """
+    original_spec = _read_spec_file(spec_path)
+    work_dir = str(Path(spec_path).parent)
+
     if llm_fn is None:
         logger.warning("run_spec_agent: no LLM available — returning spec unchanged.")
         return SpecAgentResult(
             needs_user_input=True,
             questions=["No LLM provider configured. Please set LLM_CHAIN in environment."],
-            enhanced_spec_md=spec_md,
+            enhanced_spec_md=original_spec,
             domain="unknown",
             agent_notes="No LLM available.",
         )
 
-    system_prompt = _load_prompt(role)
-    full_prompt = f"{system_prompt}\n\n---\n\n## Input spec.md\n\n{spec_md}"
+    # Clean up stale status files before each run so results are unambiguous.
+    for stale in ("status_pass.txt", "status_need_update.txt"):
+        Path(work_dir, stale).unlink(missing_ok=True)
+
+    rules_path = str((Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
+
+    prompt_template = _load_prompt(role)
+    prompt = (
+        prompt_template
+        .replace("{SPEC_PATH}", spec_path)
+        .replace("{OUTPUT_DIR}", work_dir)
+        .replace("{RULES_PATH}", rules_path)
+    )
+
+    logger.info(
+        "run_spec_agent [%s] spec_path=%s work_dir=%s\n--- prompt ---\n%s\n--- end prompt ---",
+        role, spec_path, work_dir, prompt,
+    )
 
     try:
-        response = llm_fn(full_prompt)
+        response = llm_fn(prompt, cwd=work_dir)
     except Exception as e:
         logger.warning("run_spec_agent LLM call failed (%s): %s", role, e)
         return SpecAgentResult(
             needs_user_input=True,
             questions=[f"LLM call failed: {e}"],
-            enhanced_spec_md=spec_md,
+            enhanced_spec_md=original_spec,
             domain="unknown",
             agent_notes=f"LLM error: {e}",
         )
 
-    return _parse_agent_response(response, original_spec=spec_md)
+    # Read the role-specific output file written by the agent, if present.
+    output_filename = "reviewed_spec_primary.md" if role == "primary" else "reviewed_spec_secondary.md"
+    reviewed_spec_path = Path(work_dir) / output_filename
+    enhanced_spec_md = (
+        reviewed_spec_path.read_text(encoding="utf-8")
+        if reviewed_spec_path.exists()
+        else original_spec
+    )
+
+    pass_file = Path(work_dir) / "status_pass.txt"
+    need_update_file = Path(work_dir) / "status_need_update.txt"
+
+    if pass_file.exists():
+        domain = _extract_domain_from_spec(enhanced_spec_md)
+        agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
+        return SpecAgentResult(
+            needs_user_input=False,
+            questions=[],
+            enhanced_spec_md=enhanced_spec_md,
+            domain=domain,
+            agent_notes=agent_notes,
+        )
+
+    if need_update_file.exists():
+        questions = [
+            line.strip()
+            for line in need_update_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        domain = _extract_domain_from_spec(enhanced_spec_md)
+        agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
+        return SpecAgentResult(
+            needs_user_input=True,
+            questions=questions,
+            enhanced_spec_md=enhanced_spec_md,
+            domain=domain,
+            agent_notes=agent_notes,
+        )
+
+    # Neither status file found.
+    # If reviewed_spec.md was written, infer pass/fail from section presence.
+    if reviewed_spec_path.exists():
+        has_questions = bool(_extract_section(enhanced_spec_md, "待釐清問題").strip())
+        domain = _extract_domain_from_spec(enhanced_spec_md)
+        agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
+        logger.warning(
+            "run_spec_agent: no status file in '%s'; inferring from reviewed_spec.md "
+            "(has_questions=%s).",
+            work_dir, has_questions,
+        )
+        return SpecAgentResult(
+            needs_user_input=has_questions,
+            questions=[],
+            enhanced_spec_md=enhanced_spec_md,
+            domain=domain,
+            agent_notes=agent_notes,
+        )
+
+    # No reviewed_spec.md either — fall back to stdout parsing.
+    logger.warning("run_spec_agent: no status file and no reviewed_spec.md in '%s' — falling back to response parse.", work_dir)
+    return _parse_agent_response(response, original_spec=enhanced_spec_md)
 
 
 def parse_spec_md(spec_md: str) -> dict:
@@ -190,6 +274,15 @@ def parse_spec_md(spec_md: str) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _read_spec_file(spec_path: str) -> str:
+    """Read spec file content; return empty string on failure."""
+    try:
+        return Path(spec_path).read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("_read_spec_file failed for '%s': %s", spec_path, e)
+        return ""
+
+
 def _load_prompt(role: str) -> str:
     """Load system prompt from framework/prompts/ directory."""
     prompt_file = Path(__file__).parent / "prompts" / f"spec_agent_{role}.txt"
@@ -212,72 +305,94 @@ def _load_prompt(role: str) -> str:
 
 def _parse_agent_response(response: str, original_spec: str) -> SpecAgentResult:
     """
-    Parse LLM response:
-      1. Extract <!-- AGENT_META ... --> block for metadata.
-      2. Strip the block from the spec markdown.
+    Parse LLM response containing file blocks:
 
-    If the block is missing or malformed, treat conservatively as needs_user_input=True.
+      === FILE: reviewed_spec.md ===
+      <content>
+      === END FILE ===
+
+      === FILE: pass.txt ===        ← review passed
+      ...
+      === END FILE ===
+
+      OR
+
+      === FILE: need_update.txt === ← needs user input; questions listed inside
+      - question 1
+      - question 2
+      === END FILE ===
+
+    If the block structure is missing or malformed, treat conservatively as needs_user_input=True.
     """
-    meta_pattern = re.compile(
-        r"<!--\s*AGENT_META\s*(.*?)\s*-->",
+    file_pattern = re.compile(
+        r"=== FILE:\s*(\S+)\s*===\s*\n(.*?)\n=== END FILE ===",
         re.DOTALL,
     )
-    meta_match = meta_pattern.search(response)
+    files = {m.group(1).strip(): m.group(2).strip() for m in file_pattern.finditer(response)}
 
-    if not meta_match:
-        logger.warning("AGENT_META block not found in LLM response — treating as needs_user_input.")
+    if not files:
+        logger.warning("No file blocks found in LLM response — treating as needs_user_input.")
         return SpecAgentResult(
             needs_user_input=True,
-            questions=["Agent response did not include required AGENT_META block."],
+            questions=["Agent response did not include required file blocks."],
             enhanced_spec_md=response.strip() or original_spec,
             domain="unknown",
-            agent_notes="Missing AGENT_META block.",
+            agent_notes="Missing file blocks.",
         )
 
-    meta_text = meta_match.group(1)
-    spec_md = meta_pattern.sub("", response).strip()
+    spec_md = files.get("reviewed_spec.md", "") or original_spec
 
-    # Parse metadata fields
-    needs_input = _parse_bool(meta_text, "needs_user_input", default=True)
-    domain = _parse_str(meta_text, "domain", default="unknown")
-    agent_notes = _parse_str(meta_text, "agent_notes", default="")
-    questions = _parse_list(meta_text, "questions")
+    if "need_update.txt" in files:
+        questions = [
+            line.lstrip("- ").strip()
+            for line in files["need_update.txt"].splitlines()
+            if line.strip().startswith("-")
+        ]
+        domain = _extract_domain_from_spec(spec_md)
+        agent_notes = _extract_section(spec_md, "Agent Notes")
+        return SpecAgentResult(
+            needs_user_input=True,
+            questions=questions,
+            enhanced_spec_md=spec_md,
+            domain=domain,
+            agent_notes=agent_notes,
+        )
 
+    if "pass.txt" in files:
+        domain = _extract_domain_from_spec(spec_md)
+        agent_notes = _extract_section(spec_md, "Agent Notes")
+        return SpecAgentResult(
+            needs_user_input=False,
+            questions=[],
+            enhanced_spec_md=spec_md,
+            domain=domain,
+            agent_notes=agent_notes,
+        )
+
+    logger.warning("Neither pass.txt nor need_update.txt found in LLM response — treating as needs_user_input.")
     return SpecAgentResult(
-        needs_user_input=needs_input,
-        questions=questions,
-        enhanced_spec_md=spec_md or original_spec,
-        domain=domain,
-        agent_notes=agent_notes,
+        needs_user_input=True,
+        questions=["Agent response did not include pass.txt or need_update.txt."],
+        enhanced_spec_md=spec_md,
+        domain="unknown",
+        agent_notes="Missing status file.",
     )
 
 
-def _parse_bool(text: str, key: str, default: bool = False) -> bool:
-    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
-    if not m:
-        return default
-    return m.group(1).strip().lower() in ("true", "yes", "1")
+def _extract_domain_from_spec(spec_md: str) -> str:
+    """Extract domain from reviewed_spec.md."""
+    m = re.search(r"##\s*研究領域\s*\n([^\n#]+)", spec_md)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"##\s*Domain\s*\n([^\n#]+)", spec_md)
+    if m:
+        return m.group(1).strip()
+    return "unknown"
 
 
-def _parse_str(text: str, key: str, default: str = "") -> str:
-    m = re.search(rf"^{re.escape(key)}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
-    if not m:
-        return default
-    return m.group(1).strip()
+def _extract_section(spec_md: str, header: str) -> str:
+    """Extract a markdown section by header name."""
+    m = re.search(rf"##\s*{re.escape(header)}\s*\n(.*?)(?=\n##|\Z)", spec_md, re.DOTALL)
+    return m.group(1).strip() if m else ""
 
 
-def _parse_list(text: str, key: str) -> list[str]:
-    """Parse a YAML-style list or inline [] from metadata block."""
-    # Inline empty: questions: []
-    inline_m = re.search(rf"^{re.escape(key)}:\s*\[\s*\]", text, re.MULTILINE | re.IGNORECASE)
-    if inline_m:
-        return []
-    # Multi-line list items:  - "item"
-    list_m = re.search(
-        rf"^{re.escape(key)}:\s*\n((?:\s+-\s+.+\n?)*)",
-        text, re.MULTILINE | re.IGNORECASE,
-    )
-    if list_m:
-        items = re.findall(r"^\s+-\s+[\"']?(.+?)[\"']?\s*$", list_m.group(1), re.MULTILINE)
-        return [i.strip() for i in items if i.strip()]
-    return []
