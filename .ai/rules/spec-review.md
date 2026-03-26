@@ -63,7 +63,7 @@ These rules apply when reviewing a research specification (`spec.md`).
 - 倉位 Sizing 與風險規則
 - 執行假設：訂單類型、滑價、手續費、延遲、再平衡頻率
 - 績效門檻：min win rate、max drawdown、min alpha ratio、profit factor (IS/OOS)
-- Plugin：`quant_alpha`
+- Plugin：`quant_alpha`（固定值，無論 spec 寫什麼都統一更正為此值）
 
 ## 7. 輸出檔案規範
 
@@ -71,7 +71,7 @@ These rules apply when reviewing a research specification (`spec.md`).
 
 | 檔案 | 條件 | 內容 |
 |------|------|------|
-| `reviewed_spec.md` | 每次都寫 | 完整審查後的規格文件 |
+| `reviewed_spec_primary.md`（Primary）或 `reviewed_spec_secondary.md`（Secondary） | 每次都寫 | 完整審查後的規格文件 |
 | `status_pass.txt` | 規格完整，無待釐清問題 | 空檔（或寫 `PASS`） |
 | `status_need_update.txt` | 有待釐清問題 | 每行一個問題，與 `## 待釐清問題` 內容一致 |
 

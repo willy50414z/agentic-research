@@ -145,6 +145,22 @@ def _run_resume_bg(project_id: str, decision: dict) -> None:
         last_result = vals.get("last_result", "UNKNOWN")
         last_reason = vals.get("last_reason", "")
 
+        if state and state.next:
+            last_result = vals.get("last_result", "UNKNOWN")
+            loop_index = vals.get("loop_index", "?")
+            logger.info(
+                "[resume_bg] project='%s' RE-INTERRUPTED at %s  last_result=%s  loop=%s — moving to Review.",
+                project_id, list(state.next), last_result, loop_index,
+            )
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    f"**計畫待審核** — 請確認上方計畫後，將卡片移回 **Verify** 繼續執行，"
+                    f"或留在 **Review** 暫停。\n\n等待節點：`{'`, `'.join(state.next)}`",
+                )
+            _move_planka_card(project_id, _COL_REVIEW)
+            return
+
         _finish_run(project_id, last_result, last_reason)
         logger.info("Resumed project '%s' with action: %s", project_id, decision.get("action"))
     except Exception as e:
@@ -188,6 +204,24 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
         vals = (state.values or {}) if state else {}
         last_result = vals.get("last_result", "UNKNOWN")
         last_reason = vals.get("last_reason", "")
+
+        # If the graph paused at a human-in-the-loop interrupt (state.next is non-empty),
+        # move to Review so the user can inspect the plan and move the card back to Verify to approve.
+        if state and state.next:
+            last_result = vals.get("last_result", "UNKNOWN")
+            loop_index = vals.get("loop_index", "?")
+            logger.info(
+                "[start_bg] project='%s' INTERRUPTED at %s  last_result=%s  loop=%s — moving to Review.",
+                project_id, list(state.next), last_result, loop_index,
+            )
+            if _planka_sink:
+                _planka_sink.post_comment(
+                    project_id,
+                    f"**計畫待審核** — 請確認上方計畫後，將卡片移回 **Verify** 繼續執行，"
+                    f"或留在 **Review** 暫停。\n\n等待節點：`{'`, `'.join(state.next)}`",
+                )
+            _move_planka_card(project_id, _COL_REVIEW)
+            return
 
         _finish_run(project_id, last_result, last_reason)
         logger.info("Graph completed for project '%s' with result: %s", project_id, last_result)
@@ -513,20 +547,31 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
     if list_name == _COL_VERIFY:
         try:
             graph = _get_graph(project_id)
-            has_checkpoint = _has_checkpoint(graph, project_id)
-        except Exception:
+            state = graph.get_state(config=_thread_config(project_id))
+            has_checkpoint = bool(state and state.values and state.next)
+        except Exception as e:
+            logger.warning("[verify] failed to read graph state for '%s': %s", project_id, e)
             has_checkpoint = False
+            state = None
 
         if has_checkpoint:
-            # Resume a plan-approval interrupt still active
+            next_nodes = list(state.next) if state else []
+            last_result = (state.values or {}).get("last_result", "UNKNOWN") if state else "UNKNOWN"
+            loop_index = (state.values or {}).get("loop_index", "?") if state else "?"
+            logger.info(
+                "[verify] project='%s' RESUME checkpoint  next=%s  last_result=%s  loop=%s",
+                project_id, next_nodes, last_result, loop_index,
+            )
             notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
             background_tasks.add_task(_run_resume_bg, project_id, {"action": "continue", "notes": notes})
-            logger.info("Planka webhook: project=%s resuming active checkpoint", project_id)
             return {"status": "ok", "project_id": project_id, "action": "resume"}
         else:
-            # Fresh start (e.g. card moved from Review back to Verify)
+            plugin_name = (project.get("plugin_name") or "?")
+            logger.info(
+                "[verify] project='%s' FRESH START  plugin=%s  has_state=%s",
+                project_id, plugin_name, bool(state and state.values),
+            )
             background_tasks.add_task(_run_start_bg, project_id, _build_initial_state(project))
-            logger.info("Planka webhook: project=%s fresh start from Verify", project_id)
             return {"status": "ok", "project_id": project_id, "action": "start"}
 
     if list_name == _COL_FAILED:

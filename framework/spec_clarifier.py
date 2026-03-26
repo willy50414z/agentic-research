@@ -117,6 +117,7 @@ def run_spec_agent(
     need_update_file = Path(work_dir) / "status_need_update.txt"
 
     if pass_file.exists():
+        logger.info("run_spec_agent [%s] status=PASS (status_pass.txt found in '%s')", role, work_dir)
         domain = _extract_domain_from_spec(enhanced_spec_md)
         agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
         return SpecAgentResult(
@@ -133,6 +134,10 @@ def run_spec_agent(
             for line in need_update_file.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+        logger.info(
+            "run_spec_agent [%s] status=NEED_UPDATE (status_need_update.txt found in '%s', %d questions)",
+            role, work_dir, len(questions),
+        )
         domain = _extract_domain_from_spec(enhanced_spec_md)
         agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
         return SpecAgentResult(
@@ -143,28 +148,26 @@ def run_spec_agent(
             agent_notes=agent_notes,
         )
 
-    # Neither status file found.
-    # If reviewed_spec.md was written, infer pass/fail from section presence.
-    if reviewed_spec_path.exists():
-        has_questions = bool(_extract_section(enhanced_spec_md, "待釐清問題").strip())
-        domain = _extract_domain_from_spec(enhanced_spec_md)
-        agent_notes = _extract_section(enhanced_spec_md, "Agent Notes")
-        logger.warning(
-            "run_spec_agent: no status file in '%s'; inferring from reviewed_spec.md "
-            "(has_questions=%s).",
-            work_dir, has_questions,
-        )
-        return SpecAgentResult(
-            needs_user_input=has_questions,
-            questions=[],
-            enhanced_spec_md=enhanced_spec_md,
-            domain=domain,
-            agent_notes=agent_notes,
-        )
-
-    # No reviewed_spec.md either — fall back to stdout parsing.
-    logger.warning("run_spec_agent: no status file and no reviewed_spec.md in '%s' — falling back to response parse.", work_dir)
-    return _parse_agent_response(response, original_spec=enhanced_spec_md)
+    # Neither status file was written — the agent did not follow the protocol.
+    # Treat as an error: needs_user_input=True so the card goes back to Planning.
+    missing_files = []
+    if not reviewed_spec_path.exists():
+        missing_files.append(reviewed_spec_path.name)
+    missing_files += ["status_pass.txt", "status_need_update.txt"]
+    logger.error(
+        "run_spec_agent [%s] NO STATUS FILE in '%s'. "
+        "Agent did not write status_pass.txt or status_need_update.txt. "
+        "reviewed_spec exists=%s. Treating as needs_user_input.",
+        role, work_dir, reviewed_spec_path.exists(),
+    )
+    return SpecAgentResult(
+        needs_user_input=True,
+        questions=[f"Agent [{role}] did not produce a status file (status_pass.txt / status_need_update.txt). "
+                   f"reviewed_spec exists: {reviewed_spec_path.exists()}"],
+        enhanced_spec_md=enhanced_spec_md,
+        domain=_extract_domain_from_spec(enhanced_spec_md),
+        agent_notes="Missing status file — protocol violation.",
+    )
 
 
 def parse_spec_md(spec_md: str) -> dict:
