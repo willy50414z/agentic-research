@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 from framework.llm_agent.llm_target import LLMTarget
 
 _OPENCODE_RUNTIME_DIR = Path("data") / "tool-runtime" / "opencode"
+_REPO_ROOT = str(Path(__file__).parent.parent.parent.resolve())
 
 _ALLOW_ALL_OPENCODE_PERMISSION = {
     "bash": "allow", "read": "allow", "edit": "allow", "task": "allow",
@@ -116,12 +117,31 @@ def run_once(
             stdin_input = prompt_file.read_text(encoding=encoding)
 
         elif target == LLMTarget.GEMINI:
-            command = [_resolve_cli("gemini"), "--approval-mode", "yolo", "--sandbox", "false",
-                       "--prompt", prompt_file.read_text(encoding=encoding)]
+            # Use auto_edit approval (file writes only, no shell commands).
+            # Prepend strict scope constraints to prevent Gemini from implementing code
+            # instead of just reviewing the spec.
+            gemini_prompt = (
+                "STRICT RULE: write exactly two files and nothing else."
+                " File 1: reviewed_spec_primary.md at the path stated in the prompt."
+                " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
+                " OR status_need_update.txt (one question per line) if questions exist."
+                " Do NOT create any other file, directory, script, or code."
+                " Do NOT implement any software. Do NOT run shell commands."
+                " Use write_file tool. Do NOT print file contents to stdout.\n\n"
+                + prompt_file.read_text(encoding=encoding)
+            )
+            command = [_resolve_cli("gemini"), "--approval-mode", "auto_edit", "--prompt", gemini_prompt]
 
         elif target == LLMTarget.CODEX:
+            # Use repo root as cwd so AGENTS.md loads and enables tool use (same as aa.py).
+            # Prompt must have no newlines — codex.cmd (Windows batch) truncates at the first
+            # newline in a command-line argument.  Prompt templates are already single-line;
+            # strip() + replace as a safety net.
+            # Absolute paths in the prompt + AGENTS.md Output Path Rule prevent writes to
+            # wrong locations when codex scans the repo.
+            work_dir = _REPO_ROOT
             command = [_resolve_cli("codex"), "exec", "--dangerously-bypass-approvals-and-sandbox",
-                       prompt_file.read_text(encoding=encoding)]
+                       prompt_file.read_text(encoding=encoding).strip().replace("\n", " ")]
 
         elif target == LLMTarget.OPENCODE:
             env.setdefault("OPENCODE_PERMISSION", json.dumps(_ALLOW_ALL_OPENCODE_PERMISSION))
@@ -210,3 +230,53 @@ def run_once(
     finally:
         prompt_file.unlink(missing_ok=True)
         output_file.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Codex trust helper
+# ---------------------------------------------------------------------------
+
+def _get_codex_workspace() -> str:
+    """
+    Return the path to the dedicated codex workspace directory.
+
+    The workspace lives at ${VOLUME_BASE_DIR}/codex-workspace/ and contains:
+      - AGENTS.md: minimal agent instructions (no project catalogue)
+      - .codex/skills/windows-text-read-bat/: skill that enables agentic tool mode
+
+    Returns the workspace path string (may not exist if VOLUME_BASE_DIR is unset).
+    """
+    volume_base = os.getenv("VOLUME_BASE_DIR", "./data")
+    workspace = Path(volume_base) / "codex-workspace"
+    _ensure_codex_trusted(str(workspace))
+    return str(workspace)
+
+
+def _ensure_codex_trusted(directory: str) -> None:
+    """
+    Ensure `directory` is listed as a trusted project in ~/.codex/config.toml.
+
+    Codex only executes tools (file writes, shell commands) inside trusted directories.
+    If the directory is not yet listed, append it.  Safe to call repeatedly.
+    Never raises — failures are logged as warnings.
+    """
+    try:
+        config_path = Path.home() / ".codex" / "config.toml"
+        if not config_path.exists():
+            logger.debug("_ensure_codex_trusted: config not found at %s, skipping.", config_path)
+            return
+
+        content = config_path.read_text(encoding="utf-8")
+        # Codex stores paths with various quoting styles; normalise to forward slashes for comparison.
+        norm = str(Path(directory).resolve()).replace("\\", "/")
+        if norm.lower() in content.lower() or directory.lower() in content.lower():
+            logger.debug("_ensure_codex_trusted: '%s' already trusted.", directory)
+            return
+
+        # Append a new [projects.'<dir>'] section with trust_level = "trusted"
+        resolved = str(Path(directory).resolve())
+        entry = f"\n[projects.'{resolved}']\ntrust_level = \"trusted\"\n"
+        config_path.write_text(content + entry, encoding="utf-8")
+        logger.info("_ensure_codex_trusted: added '%s' to codex trusted projects.", resolved)
+    except Exception as e:
+        logger.warning("_ensure_codex_trusted failed for '%s': %s", directory, e)

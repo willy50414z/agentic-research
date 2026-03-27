@@ -62,7 +62,7 @@ def _mlflow_log(project_id: str, loop: int, plan: dict, metrics: dict, result: s
         logger.info("[QuantAlpha] mlflow logged: project=%s loop=%d result=%s", project_id, loop, result)
     except Exception as e:
         logger.warning("[QuantAlpha] mlflow log failed (loop=%d): %s", loop, e)
-_PROMPTS_DIR  = Path(__file__).parent / "prompts"
+_PROMPTS_DIR = Path(__file__).parent.parent.parent / "framework" / "prompts" / "quant_alpha"
 
 # Default strategy used by rule-based fallback when LLM is unavailable.
 # Seeds are MD5-stable, so results are reproducible across processes.
@@ -161,7 +161,9 @@ class QuantAlphaPlugin(ResearchPlugin):
         return {
             "loop_goal":            goal,
             "implementation_plan":  plan,
-            "needs_human_approval": True,
+            "needs_human_approval": False,
+            "last_result":          "PLAN_READY",
+            "last_reason":          f"Plan selected: {plan.get('strategy_type', '?')}.",
         }
 
     # ── implement ─────────────────────────────────────────────────────────────

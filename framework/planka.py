@@ -357,12 +357,15 @@ def _extract_thread_id(description: str) -> str | None:
 
 def _make_volume_path(filename: str) -> str | None:
     """
-    Build ${VOLUME_BASE_DIR}/{timestamp}/{filename}, create the directory, and return the path.
+    Build ${VOLUME_BASE_DIR}/agentic-framework-api/llm/{yyyyMMddHHmmSS.S}/{filename},
+    create the directory, and return the path.
     Returns None on failure.
     """
-    import os, time
+    import os
+    from datetime import datetime
     volume_base = os.getenv("VOLUME_BASE_DIR", "./data")
-    save_dir = os.path.join(volume_base, str(int(time.time())))
+    ts = datetime.now().strftime("%Y%m%d%H%M%S.%f")[:-4]  # yyyyMMddHHmmSS.S  (e.g. 20260327143022.1)
+    save_dir = os.path.join(volume_base, "agentic-framework-api", "llm", ts)
     try:
         os.makedirs(save_dir, exist_ok=True)
         return os.path.join(save_dir, filename)

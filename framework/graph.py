@@ -27,6 +27,7 @@ max_loops enforcement:
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import TypedDict, Optional
 
 import psycopg
@@ -140,6 +141,7 @@ def _make_summarize_wrapper(summarize_fn, sink):
                         "Uploaded per-loop report '%s' to Planka card '%s'.",
                         filename, card_id,
                     )
+                Path(path).unlink(missing_ok=True)
             except Exception as e:
                 logger.warning("Per-loop Planka upload failed: %s", e)
             # Remove from artifacts: the file lives in Planka, not tracked locally
@@ -184,6 +186,7 @@ def _make_terminate_summarize_wrapper(terminate_summarize_fn, sink):
                         "Uploaded terminate report '%s' to Planka card '%s'.",
                         filename, card_id,
                     )
+                Path(path).unlink(missing_ok=True)
             except Exception as e:
                 logger.warning("Terminate report Planka upload failed: %s", e)
         return result
@@ -420,8 +423,8 @@ def _make_node_logger(node_name: str, node_fn, sink):
 def _post_node_comment(node_name: str, state: dict, result: dict, sink) -> None:
     """Format a structured Planka comment for a completed node execution."""
     project_id = state.get("project_id", "unknown")
-    loop = state.get("loop_index", 0)
     merged = {**state, **result}
+    loop = merged.get("loop_index", 0)
     lines = [f"[{node_name.upper()}] Loop {loop}"]
 
     if node_name == "plan":

@@ -77,14 +77,16 @@ def run_spec_agent(
     for stale in ("status_pass.txt", "status_need_update.txt"):
         Path(work_dir, stale).unlink(missing_ok=True)
 
-    rules_path = str((Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
+    rules_path  = str((Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
+    plugin_dir  = str((Path(__file__).parent.parent / "projects" / "quant_alpha").resolve())
 
     prompt_template = _load_prompt(role)
     prompt = (
         prompt_template
-        .replace("{SPEC_PATH}", spec_path)
-        .replace("{OUTPUT_DIR}", work_dir)
-        .replace("{RULES_PATH}", rules_path)
+        .replace("{SPEC_PATH}",   spec_path)
+        .replace("{OUTPUT_DIR}",  work_dir)
+        .replace("{RULES_PATH}",  rules_path)
+        .replace("{PLUGIN_DIR}",  plugin_dir)
     )
 
     logger.info(
@@ -94,6 +96,12 @@ def run_spec_agent(
 
     try:
         response = llm_fn(prompt, cwd=work_dir)
+        # Persist LLM stdout response so it can be uploaded to the card later.
+        llm_out_path = Path(work_dir) / f"llm_response_{role}.txt"
+        try:
+            llm_out_path.write_text(response or "", encoding="utf-8")
+        except Exception as _e:
+            logger.warning("Could not save LLM response to '%s': %s", llm_out_path, _e)
     except Exception as e:
         logger.warning("run_spec_agent LLM call failed (%s): %s", role, e)
         return SpecAgentResult(

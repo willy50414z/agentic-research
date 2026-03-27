@@ -340,11 +340,11 @@ def _run_spec_review_bg(
         primary_name, primary_fn = llm_chain[0]
         secondary_name, secondary_fn = llm_chain[1] if len(llm_chain) > 1 else llm_chain[0]
         logger.info(
-            "[spec-review]          chain ready: primary='%s' secondary='%s'",
+            "[spec-review] step 4/8  chain ready: primary='%s' secondary='%s'",
             primary_name, secondary_name,
         )
 
-        # --- 6. Primary LLM: rewrite spec ---
+        # --- 5. Primary LLM: rewrite spec ---
         logger.info("[spec-review] step 5/8  primary LLM ('%s') rewriting spec ...", primary_name)
         try:
             result1 = run_spec_agent(spec_path, llm_fn=primary_fn, role="primary")
@@ -404,9 +404,9 @@ def _run_spec_review_bg(
             _move_planka_card(project_id, _COL_PLANNING)
             return
 
-        # Secondary passed — upload the final reviewed spec
-        if _planka_sink and result2.enhanced_spec_md:
-            _planka_sink.upload_spec_attachment(card_id, "reviewed_spec_secondary.md", result2.enhanced_spec_md)
+        # Secondary passed — upload ALL files from work_dir to the card
+        if _planka_sink and card_id:
+            _upload_work_dir_files(card_id, os.path.dirname(spec_path))
 
         # --- 8. Both passed → read custom fields, parse, start ---
         logger.info("[spec-review] step 7/8  both LLMs passed — reading custom fields & parsing spec ...")
@@ -448,6 +448,46 @@ def _run_spec_review_bg(
         logger.exception("[spec-review] ERROR  card='%s' unhandled exception: %s", card_name, e)
         _clear_review_flag(project_id)
         _post_error_and_move_planning(project_id, "Spec review", e)
+
+
+_SKIP_UPLOAD = {
+    # Flow-control status files — never shown to user
+    "status_pass.txt",
+    "status_need_update.txt",
+    # Raw LLM stdout debug files — internal, not useful as card attachments
+    "llm_response_primary.txt",
+    "llm_response_secondary.txt",
+    # Files already uploaded inline during spec-review steps 5 & 6
+    "reviewed_spec_primary.md",
+    "reviewed_spec_secondary.md",
+    # Original spec — already on the card; re-uploading creates a duplicate
+    "spec.md",
+    # Rules file copied into work_dir by test scripts
+    "spec-review.md",
+}
+
+
+def _upload_work_dir_files(card_id: str, work_dir: str) -> None:
+    """Upload every file in work_dir (except status control files) to the Planka card, then delete the directory."""
+    import shutil
+    from pathlib import Path
+    work_path = Path(work_dir)
+    for fpath in sorted(work_path.iterdir()):
+        if not fpath.is_file():
+            continue
+        if fpath.name in _SKIP_UPLOAD:
+            continue
+        try:
+            content = fpath.read_text(encoding="utf-8")
+            _planka_sink.upload_spec_attachment(card_id, fpath.name, content)
+            logger.info("Uploaded work_dir file '%s' to card '%s'.", fpath.name, card_id)
+        except Exception as e:
+            logger.warning("Failed to upload '%s': %s", fpath.name, e)
+    try:
+        shutil.rmtree(work_path)
+        logger.info("Deleted work_dir '%s' after upload.", work_path)
+    except Exception as e:
+        logger.warning("Failed to delete work_dir '%s': %s", work_path, e)
 
 
 def _post_error_and_move_planning(project_id: str, stage: str, exc: Exception) -> None:
