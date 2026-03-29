@@ -47,7 +47,9 @@ class SpecAgentResult:
 def run_spec_agent(
     spec_path: str,
     llm_fn: Callable[[str], str] | None,
-    role: str = "primary",
+    role: str = "initial",
+    provider_name: str = "",
+    round_index: int = 0,
 ) -> SpecAgentResult:
     """
     Run a spec-writing agent (primary or secondary) against a local spec.md file.
@@ -80,14 +82,29 @@ def run_spec_agent(
     rules_path  = str((Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
     plugin_dir  = str((Path(__file__).parent.parent / "projects" / "quant_alpha").resolve())
 
+    # Build review_notes block for synthesize role
+    review_notes_block = ""
+    if role == "synthesize":
+        notes_files = sorted(Path(work_dir).glob("review_notes_round*.txt"))
+        parts = []
+        for nf in notes_files:
+            parts.append(f"=== {nf.name} ===\n{nf.read_text(encoding='utf-8').strip()}")
+        review_notes_block = "\n\n".join(parts) if parts else "(no reviewer notes)"
+
     prompt_template = _load_prompt(role)
     prompt = (
         prompt_template
-        .replace("{SPEC_PATH}",   spec_path)
-        .replace("{OUTPUT_DIR}",  work_dir)
-        .replace("{RULES_PATH}",  rules_path)
-        .replace("{PLUGIN_DIR}",  plugin_dir)
+        .replace("{SPEC_PATH}",        spec_path)
+        .replace("{OUTPUT_DIR}",       work_dir)
+        .replace("{RULES_PATH}",       rules_path)
+        .replace("{PLUGIN_DIR}",       plugin_dir)
+        .replace("{ROUND_INDEX}",      str(round_index))
+        .replace("{REVIEW_NOTES}",     review_notes_block)
     )
+
+    # Gemini requires strict output constraints prepended to every prompt
+    if "gemini" in provider_name.lower():
+        prompt = _gemini_prefix(role, work_dir, round_index) + prompt
 
     logger.info(
         "run_spec_agent [%s] spec_path=%s work_dir=%s\n--- prompt ---\n%s\n--- end prompt ---",
@@ -112,8 +129,32 @@ def run_spec_agent(
             agent_notes=f"LLM error: {e}",
         )
 
-    # Read the role-specific output file written by the agent, if present.
-    output_filename = "reviewed_spec_primary.md" if role == "primary" else "reviewed_spec_secondary.md"
+    # --- review role: read review_notes file, return without spec update ---
+    if role == "review":
+        notes_filename = f"review_notes_round{round_index}.txt"
+        notes_path = Path(work_dir) / notes_filename
+        if notes_path.exists():
+            notes_text = notes_path.read_text(encoding="utf-8").strip()
+            questions = [line.strip() for line in notes_text.splitlines() if line.strip()]
+        else:
+            logger.warning("run_spec_agent [review] notes file '%s' not found.", notes_path)
+            questions = ["Reviewer did not produce a notes file."]
+        return SpecAgentResult(
+            needs_user_input=False,
+            questions=questions,
+            enhanced_spec_md=original_spec,   # reviewer does not change the spec
+            domain=_extract_domain_from_spec(original_spec),
+            agent_notes=f"Round {round_index} review by {provider_name or 'unknown'}.",
+        )
+
+    # Read the role-specific reviewed spec written by the agent, if present.
+    _role_output_map = {
+        "primary":    "reviewed_spec_primary.md",    # legacy
+        "secondary":  "reviewed_spec_secondary.md",  # legacy
+        "initial":    "reviewed_spec_initial.md",
+        "synthesize": "reviewed_spec_final.md",
+    }
+    output_filename = _role_output_map.get(role, f"reviewed_spec_{role}.md")
     reviewed_spec_path = Path(work_dir) / output_filename
     enhanced_spec_md = (
         reviewed_spec_path.read_text(encoding="utf-8")
@@ -295,12 +336,24 @@ def _read_spec_file(spec_path: str) -> str:
 
 
 def _load_prompt(role: str) -> str:
-    """Load system prompt from framework/prompts/ directory."""
-    prompt_file = Path(__file__).parent / "prompts" / f"spec_agent_{role}.txt"
-    if prompt_file.exists():
-        return prompt_file.read_text(encoding="utf-8")
-    # Fallback inline prompt
-    logger.warning("Prompt file not found: %s — using inline fallback.", prompt_file)
+    """Load system prompt from framework/prompts/ directory.
+
+    Role aliases:
+      'initial'    → spec_agent_initial.txt   (falls back to spec_agent_primary.txt)
+      'primary'    → spec_agent_primary.txt   (legacy)
+      'secondary'  → spec_agent_secondary.txt (legacy)
+      'review'     → spec_agent_review.txt
+      'synthesize' → spec_agent_synthesize.txt
+    """
+    prompts_dir = Path(__file__).parent / "prompts"
+    candidates = [prompts_dir / f"spec_agent_{role}.txt"]
+    # Fallback alias: initial → primary
+    if role == "initial":
+        candidates.append(prompts_dir / "spec_agent_primary.txt")
+    for prompt_file in candidates:
+        if prompt_file.exists():
+            return prompt_file.read_text(encoding="utf-8")
+    logger.warning("Prompt file not found for role '%s' — using inline fallback.", role)
     return (
         "You are a research specification agent. "
         "Rewrite the given spec.md to be complete and executable. "
@@ -312,6 +365,42 @@ def _load_prompt(role: str) -> str:
         "agent_notes: <what you did>\n"
         "-->"
     )
+
+
+def _gemini_prefix(role: str, work_dir: str, round_index: int) -> str:
+    """Return Gemini-specific output constraint prefix for a given role."""
+    if role in ("initial", "primary"):
+        return (
+            "STRICT RULE: write exactly two files and nothing else."
+            f" File 1: reviewed_spec_{'initial' if role == 'initial' else 'primary'}.md"
+            f" at the path stated in the prompt ({work_dir})."
+            " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
+            " OR status_need_update.txt (one question per line) if questions exist."
+            " Do NOT create any other file, directory, script, or code."
+            " Do NOT implement any software. Do NOT run shell commands."
+            " Use write_file tool. Do NOT print file contents to stdout.\n\n"
+        )
+    if role == "review":
+        return (
+            "STRICT RULE: write exactly one file and nothing else."
+            f" File: review_notes_round{round_index}.txt"
+            f" at the path stated in the prompt ({work_dir})."
+            " Each line must be one review comment or question (plain text, no markdown)."
+            " Do NOT create any other file, directory, script, or code."
+            " Do NOT implement any software. Do NOT run shell commands."
+            " Use write_file tool. Do NOT print file contents to stdout.\n\n"
+        )
+    if role == "synthesize":
+        return (
+            "STRICT RULE: write exactly two files and nothing else."
+            f" File 1: reviewed_spec_final.md at the path stated in the prompt ({work_dir})."
+            " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
+            " OR status_need_update.txt (one question per line) if questions exist."
+            " Do NOT create any other file, directory, script, or code."
+            " Do NOT implement any software. Do NOT run shell commands."
+            " Use write_file tool. Do NOT print file contents to stdout.\n\n"
+        )
+    return ""
 
 
 def _parse_agent_response(response: str, original_spec: str) -> SpecAgentResult:

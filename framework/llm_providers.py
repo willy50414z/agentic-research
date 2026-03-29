@@ -26,8 +26,6 @@ import os
 import logging
 from typing import Callable
 
-from framework.llm_agent.llm_svc import ping
-
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS: list[str] = [

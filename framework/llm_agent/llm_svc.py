@@ -53,20 +53,6 @@ def _resolve_cli(command_name: str) -> str:
     resolved = shutil.which(command_name)
     return resolved if resolved else command_name
 
-def ping(target: LLMTarget):
-    if LLMTarget.CLAUDE:
-        completed = subprocess.run(
-            "claude auth status",
-            capture_output=True,
-            text=True
-        )
-        return "\"loggedIn\": true" in completed.stdout
-    else:
-        logging.warn(f"{target.name} ping login has not setting")
-        return False
-
-
-
 def run_once(
     target: LLMTarget,
     prompt: str,
@@ -117,20 +103,8 @@ def run_once(
             stdin_input = prompt_file.read_text(encoding=encoding)
 
         elif target == LLMTarget.GEMINI:
-            # Use auto_edit approval (file writes only, no shell commands).
-            # Prepend strict scope constraints to prevent Gemini from implementing code
-            # instead of just reviewing the spec.
-            gemini_prompt = (
-                "STRICT RULE: write exactly two files and nothing else."
-                " File 1: reviewed_spec_primary.md at the path stated in the prompt."
-                " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
-                " OR status_need_update.txt (one question per line) if questions exist."
-                " Do NOT create any other file, directory, script, or code."
-                " Do NOT implement any software. Do NOT run shell commands."
-                " Use write_file tool. Do NOT print file contents to stdout.\n\n"
-                + prompt_file.read_text(encoding=encoding)
-            )
-            command = [_resolve_cli("gemini"), "--approval-mode", "auto_edit", "--prompt", gemini_prompt]
+            command = [_resolve_cli("gemini"), "--approval-mode", "auto_edit",
+                       "--prompt", prompt_file.read_text(encoding=encoding)]
 
         elif target == LLMTarget.CODEX:
             # Use repo root as cwd so AGENTS.md loads and enables tool use (same as aa.py).

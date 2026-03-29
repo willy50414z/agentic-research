@@ -39,6 +39,8 @@ from framework.db.queries import create_project, get_project
 from framework.plugin_registry import resolve as resolve_plugin
 from framework.graph import get_or_build_graph
 from framework.spec_clarifier import run_spec_agent, parse_spec_md, SpecAgentResult
+from framework.llm_preflight import preflight_check, get_preflight_results
+from framework.spec_review_graph import get_or_build_spec_review_graph, SpecReviewState
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,18 @@ async def _lifespan(app: FastAPI):
         _planka_sink = PlankaSink(PLANKA_URL, PLANKA_TOKEN, PLANKA_BOARD_ID, DATABASE_URL)
         _planka_sink.ensure_custom_fields()
         logger.info("PlankaSink initialized with custom fields.")
+
+    # --- Preflight: verify all required services before accepting traffic ---
+    llm_chain = os.getenv("LLM_CHAIN", "")
+    results = preflight_check(
+        db_url=DATABASE_URL,
+        planka_url=PLANKA_URL,
+        planka_token=PLANKA_TOKEN,
+        llm_chain_str=llm_chain,
+    )
+    app.state.preflight = results
+    logger.info("Preflight passed: %s", list(results.keys()))
+
     task = asyncio.create_task(_scheduler_loop())
     logger.info("Scheduler started.")
     yield
@@ -237,75 +251,65 @@ def _run_spec_review_bg(
     description: str,
 ) -> None:
     """
-    Dual-LLM spec-writing agent gate.
-    Called when a card is moved to Spec Pending Review.
+    Spec review gate — invokes spec_review_graph (LangGraph).
+
+    Pre-graph setup (idempotency, card_id cache, spec download) is done here.
+    All LLM calls, role routing, and Planka finalization happen inside the graph
+    with PostgresSaver checkpointing for error resume.
 
     Flow:
       1. Idempotency check (review_in_progress flag).
-      2. Ensure thread_id in card description.
-      3. Check for .md attachment — reject without it.
-      4. Ping each LLM provider — skip unavailable ones, abort if none reachable.
-      5. Primary LLM: rewrite spec.md, upload new version.
-      6. Secondary LLM: consistency review, upload final version.
-      7. Both pass → read custom fields, parse spec, upsert project, move to Verify, start graph.
-      8. Any issue → comment + move to Planning.
+      2. Cache card_id, upsert project stub.
+      3. Ensure thread_id in card description.
+      4. Download spec.md attachment — abort if missing.
+      5. Invoke spec_review_graph with initial state.
     """
     logger.info("[spec-review] START  card='%s' project_id='%s'", card_name, project_id)
 
     # --- 1. Idempotency ---
-    logger.info("[spec-review] step 1/8  idempotency check ...")
     existing = get_project(project_id, DATABASE_URL)
     if existing and (existing.get("config") or {}).get("review_in_progress"):
         started_at = (existing.get("config") or {}).get("review_started_at") or 0
         age_seconds = time.time() - started_at
         if age_seconds < 300:
-            # Genuinely running — clear flag and move card to Planning so user can retry
             logger.warning(
-                "[spec-review] SKIP   review already in progress for '%s' (started %.0fs ago). "
-                "Clearing flag and moving card to Planning.",
+                "[spec-review] SKIP  review already in progress for '%s' (started %.0fs ago).",
                 project_id, age_seconds,
             )
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
         else:
-            # Stale flag from a crash — clear and proceed
             logger.warning(
-                "[spec-review] stale review_in_progress for '%s' (%.0fs old), clearing and retrying.",
+                "[spec-review] stale review_in_progress for '%s' (%.0fs old), clearing.",
                 project_id, age_seconds,
             )
             _clear_review_flag(project_id)
 
     try:
-        # --- 2. Cache card_id first (needed for all subsequent Planka calls) ---
-        logger.info("[spec-review] step 2/8  caching card_id & upsert project stub ...")
+        # --- 2. Cache card_id + upsert project stub ---
         if _planka_sink:
             _planka_sink.cache_card_id(project_id, card_id)
 
-        # --- 3. Upsert project stub + set review_in_progress ---
         create_project(
             project_id=project_id,
             name=card_name,
             plugin_name="unknown",
             goal="",
-            config={
-                "review_in_progress": True,
-                "review_started_at": time.time(),
-            },
+            config={"review_in_progress": True, "review_started_at": time.time()},
             db_url=DATABASE_URL,
         )
 
-        # --- 2b. Ensure thread_id in card description (now card_id is cached) ---
+        # --- 3. Ensure thread_id in card description ---
         if not _extract_thread_id(description):
             new_desc = f"thread_id: {project_id}\n\n{description or ''}"
             if _planka_sink:
                 _planka_sink.update_card_description(project_id, new_desc)
 
-        # --- 4. Check for .md attachment — required ---
-        logger.info("[spec-review] step 3/8  downloading spec.md attachment ...")
+        # --- 4. Download spec.md attachment ---
         spec_path = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
         if not spec_path:
-            logger.warning("[spec-review] ABORT  no spec.md attachment found for card '%s'.", card_name)
+            logger.warning("[spec-review] ABORT  no spec.md attachment for card '%s'.", card_name)
             if _planka_sink:
                 _planka_sink.post_comment(
                     project_id,
@@ -320,129 +324,32 @@ def _run_spec_review_bg(
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
-        logger.info("[spec-review]          spec.md saved to %s", spec_path)
+        logger.info("[spec-review] spec.md saved to %s", spec_path)
 
-        llm_chain = _build_llm_chain()
-        if not llm_chain:
-            unavailable = ", ".join(name for name, _ in llm_chain) if llm_chain else "none configured"
-            logger.error("[spec-review] ABORT  no reachable LLM provider. chain=%s", unavailable)
-            if _planka_sink:
-                _planka_sink.post_comment(
-                    project_id,
-                    f"**LLM unavailable** — could not reach any provider in the chain "
-                    f"(`{unavailable}`).\n\n"
-                    "Please ensure the LLM CLI is installed and logged in, or the API key is set, "
-                    "then move the card back to **Spec Pending Review** to retry.",
-                )
-            _clear_review_flag(project_id)
-            _move_planka_card(project_id, _COL_PLANNING)
-            return
-        primary_name, primary_fn = llm_chain[0]
-        secondary_name, secondary_fn = llm_chain[1] if len(llm_chain) > 1 else llm_chain[0]
-        logger.info(
-            "[spec-review] step 4/8  chain ready: primary='%s' secondary='%s'",
-            primary_name, secondary_name,
-        )
-
-        # --- 5. Primary LLM: rewrite spec ---
-        logger.info("[spec-review] step 5/8  primary LLM ('%s') rewriting spec ...", primary_name)
-        try:
-            result1 = run_spec_agent(spec_path, llm_fn=primary_fn, role="primary")
-            logger.info(
-                "[spec-review]          primary done. needs_user_input=%s", result1.needs_user_input
-            )
-        except Exception as e:
-            logger.exception("[spec-review] primary LLM failed: %s", e)
-            _post_error_and_move_planning(project_id, "Primary LLM", e)
-            _clear_review_flag(project_id)
-            return
-
-        if result1.needs_user_input:
-            logger.info("[spec-review] PAUSE  primary requests clarification, moving to Planning.")
-            if _planka_sink:
-                body = "**Spec Agent — Clarification Needed**\n\n"
-                if result1.questions:
-                    body += "\n".join(f"- {q}" for q in result1.questions)
-                if result1.agent_notes:
-                    body += f"\n\n_{result1.agent_notes}_"
-                _planka_sink.post_comment(project_id, body)
-            _clear_review_flag(project_id)
-            _move_planka_card(project_id, _COL_PLANNING)
-            return
-
-        # Primary passed — upload the reviewed spec
-        if _planka_sink and result1.enhanced_spec_md:
-            _planka_sink.upload_spec_attachment(card_id, "reviewed_spec_primary.md", result1.enhanced_spec_md)
-
-        # --- 7. Secondary LLM: consistency review ---
-        logger.info("[spec-review] step 6/8  secondary LLM ('%s') consistency review ...", secondary_name)
-        reviewed_spec_path = os.path.join(os.path.dirname(spec_path), "reviewed_spec_primary.md")
-        if not os.path.exists(reviewed_spec_path):
-            logger.warning("[spec-review] reviewed_spec_primary.md not found, using original spec for secondary.")
-            reviewed_spec_path = spec_path
-        try:
-            result2 = run_spec_agent(reviewed_spec_path, llm_fn=secondary_fn, role="secondary")
-            logger.info(
-                "[spec-review]          secondary done. needs_user_input=%s", result2.needs_user_input
-            )
-        except Exception as e:
-            logger.exception("[spec-review] secondary LLM failed: %s", e)
-            _post_error_and_move_planning(project_id, "Secondary LLM", e)
-            _clear_review_flag(project_id)
-            return
-
-        if result2.needs_user_input:
-            logger.info("[spec-review] PAUSE  secondary found issues, moving to Planning.")
-            if _planka_sink:
-                body = "**Spec Agent (Secondary Review) — Issues Found**\n\n"
-                if result2.questions:
-                    body += "\n".join(f"- {q}" for q in result2.questions)
-                if result2.agent_notes:
-                    body += f"\n\n_{result2.agent_notes}_"
-                _planka_sink.post_comment(project_id, body)
-            _clear_review_flag(project_id)
-            _move_planka_card(project_id, _COL_PLANNING)
-            return
-
-        # Secondary passed — upload ALL files from work_dir to the card
-        if _planka_sink and card_id:
-            _upload_work_dir_files(card_id, os.path.dirname(spec_path))
-
-        # --- 8. Both passed → read custom fields, parse, start ---
-        logger.info("[spec-review] step 7/8  both LLMs passed — reading custom fields & parsing spec ...")
-        custom_fields = (
-            _planka_sink.read_card_custom_fields(card_id) if _planka_sink else {}
-        )
-        max_loops = int(custom_fields.get("max_loops") or 3)
-
-        parsed = parse_spec_md(result2.enhanced_spec_md)
-        logger.info(
-            "[spec-review] step 8/8  upserting project & starting graph (plugin='%s', max_loops=%d) ...",
-            parsed.get("plugin"), max_loops,
-        )
-        create_project(
-            project_id=project_id,
-            name=card_name,
-            plugin_name=parsed.get("plugin", "quant_alpha"),
-            goal=parsed.get("hypothesis", ""),
-            config={
-                "spec": parsed,
-                "max_loops": max_loops,
-                "review_in_progress": False,
-            },
-            db_url=DATABASE_URL,
-        )
-
-        if _planka_sink:
-            _planka_sink.post_comment(
-                project_id,
-                f"**Spec approved — research starting**\n"
-                f"Domain: {result2.domain} | Plugin: {parsed.get('plugin')} | "
-                f"Max {max_loops} loops",
-            )
-
-        _move_planka_card(project_id, _COL_VERIFY)
-        logger.info("[spec-review] DONE   card='%s' moved to Verify; awaiting webhook to start graph.", card_name)
+        # --- 5. Invoke spec_review_graph ---
+        initial_state: SpecReviewState = {
+            "project_id": project_id,
+            "card_id": card_id,
+            "spec_path": spec_path,
+            "participants": [],
+            "current_round": 0,
+            "total_rounds": 0,
+            "current_spec_md": "",
+            "review_notes": [],
+            "status": "in_progress",
+            "questions": [],
+        }
+        graph_config = {
+            "configurable": {
+                "thread_id": project_id,
+                "db_url": DATABASE_URL,
+                "planka_sink": _planka_sink,
+                "move_card_fn": _move_planka_card,
+            }
+        }
+        graph = get_or_build_spec_review_graph({"db_url": DATABASE_URL})
+        graph.invoke(initial_state, config=graph_config)
+        logger.info("[spec-review] DONE  graph completed for project '%s'.", project_id)
 
     except Exception as e:
         logger.exception("[spec-review] ERROR  card='%s' unhandled exception: %s", card_name, e)
@@ -630,6 +537,16 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/health/llm")
+async def health_llm():
+    results = get_preflight_results()
+    if not results:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={"status": "not ready"})
+    overall_ok = all(r.get("ok") for r in results.values())
+    return {"ok": overall_ok, "results": results}
 
 
 # ---------------------------------------------------------------------------
