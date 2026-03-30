@@ -50,6 +50,7 @@ def run_spec_agent(
     role: str = "initial",
     provider_name: str = "",
     round_index: int = 0,
+    comment_history: str = "",
 ) -> SpecAgentResult:
     """
     Run a spec-writing agent (primary or secondary) against a local spec.md file.
@@ -100,6 +101,7 @@ def run_spec_agent(
         .replace("{PLUGIN_DIR}",       plugin_dir)
         .replace("{ROUND_INDEX}",      str(round_index))
         .replace("{REVIEW_NOTES}",     review_notes_block)
+        .replace("{COMMENT_HISTORY}",  comment_history)
     )
 
     # Gemini requires strict output constraints prepended to every prompt
@@ -153,6 +155,7 @@ def run_spec_agent(
         "secondary":  "reviewed_spec_secondary.md",  # legacy
         "initial":    "reviewed_spec_initial.md",
         "synthesize": "reviewed_spec_final.md",
+        "refine":     "reviewed_spec_final.md",
     }
     output_filename = _role_output_map.get(role, f"reviewed_spec_{role}.md")
     reviewed_spec_path = Path(work_dir) / output_filename
@@ -350,6 +353,9 @@ def _load_prompt(role: str) -> str:
     # Fallback alias: initial → primary
     if role == "initial":
         candidates.append(prompts_dir / "spec_agent_primary.txt")
+    # Fallback alias: refine → synthesize (both refine from Q&A context)
+    if role == "refine":
+        candidates.append(prompts_dir / "spec_agent_synthesize.txt")
     for prompt_file in candidates:
         if prompt_file.exists():
             return prompt_file.read_text(encoding="utf-8")

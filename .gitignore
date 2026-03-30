@@ -6,3 +6,4 @@
 /.idea/workspace.xml
 *.egg-info/
 .llm_io/
+.env

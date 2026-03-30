@@ -268,8 +268,8 @@ def preflight_check(
     logger.info("preflight: %-20s %s", "database", status)
 
     _last_results = results
-    _save_cache(chain_hash, results)
     _enforce_results(results)
+    _save_cache(chain_hash, results)
     return results
 
 

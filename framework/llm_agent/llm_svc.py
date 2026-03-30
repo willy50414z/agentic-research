@@ -23,9 +23,12 @@ Raises:
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,40 @@ from framework.llm_agent.llm_target import LLMTarget
 
 _OPENCODE_RUNTIME_DIR = Path("data") / "tool-runtime" / "opencode"
 _REPO_ROOT = str(Path(__file__).parent.parent.parent.resolve())
+
+# ---------------------------------------------------------------------------
+# Quota / rate-limit error detection
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate the LLM provider has no remaining quota.
+# When matched, run_once will wait and retry instead of raising RuntimeError.
+_QUOTA_ERROR_PATTERNS: list[re.Pattern] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"exceeded your monthly token limit",
+        r"exceeded your current quota",
+        r"insufficient.quota",
+        r"quota.exceeded",
+        r"billing hard limit",
+        r"credit balance is too low",
+        r"out of credits",
+        r"rate.limit.exceeded",
+        r"429",                     # HTTP Too Many Requests often accompanies quota errors
+        r"payment required",        # HTTP 402
+    ]
+]
+
+_QUOTA_RETRY_INTERVAL_SECONDS: int = int(os.getenv("LLM_QUOTA_RETRY_INTERVAL", "300"))  # 5 min default
+_QUOTA_MAX_RETRIES: int = int(os.getenv("LLM_QUOTA_MAX_RETRIES", "288"))               # ~24 h at 5 min
+
+
+def _is_quota_error(text: str) -> bool:
+    """Return True if text contains a quota/billing exhaustion message."""
+    for pattern in _QUOTA_ERROR_PATTERNS:
+        if pattern.search(text):
+            return True
+    return False
+
 
 _ALLOW_ALL_OPENCODE_PERMISSION = {
     "bash": "allow", "read": "allow", "edit": "allow", "task": "allow",
@@ -61,6 +98,8 @@ def run_once(
     cwd: str | None = None,
     timeout: float | None = 1800,
     encoding: str = "utf-8",
+    quota_retry_interval: int | None = None,
+    quota_max_retries: int | None = None,
 ) -> str:
     """
     Invoke a CLI-based LLM agent and return its stdout as a string.
@@ -78,6 +117,9 @@ def run_once(
     """
     if not prompt.strip():
         raise ValueError("prompt must not be empty.")
+
+    _retry_interval = quota_retry_interval if quota_retry_interval is not None else _QUOTA_RETRY_INTERVAL_SECONDS
+    _max_retries    = quota_max_retries    if quota_max_retries    is not None else _QUOTA_MAX_RETRIES
 
     work_dir = str(Path(cwd).resolve()) if cwd else None
     effective_dir = work_dir or str(Path.cwd())
@@ -147,28 +189,52 @@ def run_once(
         )
         logger.debug("run_once [%s] prompt_file=%s\n%s", target.value, prompt_file, prompt)
 
-        try:
-            completed = subprocess.run(
-                command,
-                input=stdin_input,
-                capture_output=True,
-                text=True,
-                encoding=encoding,
-                cwd=work_dir,
-                env=env,
-                timeout=timeout,
-            )
-        except Exception as e:
-            logging.error("execute cmd exception: %s", e)
-            raise
+        # --- Quota-aware retry loop ---
+        completed = None
+        for quota_attempt in range(_max_retries + 1):
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=stdin_input,
+                    capture_output=True,
+                    text=True,
+                    encoding=encoding,
+                    cwd=work_dir,
+                    env=env,
+                    timeout=timeout,
+                )
+            except Exception as e:
+                logging.error("execute cmd exception: %s", e)
+                raise
 
-        if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()
-            stdout = (completed.stdout or "").strip()
-            detail = stderr or stdout or "(no output)"
-            raise RuntimeError(
-                f"{target.value} CLI failed (exit {completed.returncode}): {detail[:300]}"
-            )
+            if completed.returncode != 0:
+                stderr = (completed.stderr or "").strip()
+                stdout = (completed.stdout or "").strip()
+                parts = [s for s in [stderr, stdout] if s]
+                detail = "\n".join(parts) if parts else "(no output)"
+
+                if _is_quota_error(detail):
+                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    logger.warning(
+                        "[QUOTA EXHAUSTED] %s | time=%s | attempt=%d/%d | "
+                        "Retrying in %d s. Detail: %s",
+                        target.value, ts,
+                        quota_attempt + 1, _max_retries,
+                        _retry_interval, detail[:300],
+                    )
+                    if quota_attempt < _max_retries:
+                        time.sleep(_retry_interval)
+                        continue
+                    raise RuntimeError(
+                        f"{target.value} quota exhausted — max retries ({_max_retries}) reached "
+                        f"(last checked {ts}). Last error: {detail[:300]}"
+                    )
+
+                raise RuntimeError(
+                    f"{target.value} CLI failed (exit {completed.returncode}): {detail[:500]}"
+                )
+
+            break  # subprocess succeeded — exit retry loop
 
         raw_stdout = (completed.stdout or "").strip()
 

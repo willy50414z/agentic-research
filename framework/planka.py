@@ -187,6 +187,32 @@ class PlankaSink:
             )
             return None
 
+    def get_card_comments(self, card_id: str) -> list[dict]:
+        """
+        Fetch all comments for a card, sorted by createdAt ascending.
+
+        Uses GET /api/cards/{cardId}/actions, filters type=='commentCard'.
+        Returns list of {"text": str, "createdAt": str}.
+        Returns [] on error (non-blocking).
+        """
+        try:
+            resp = httpx.get(
+                f"{self._url}/api/cards/{card_id}/actions",
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+            comments = [
+                {"text": item["data"]["text"], "createdAt": item.get("createdAt", "")}
+                for item in items
+                if item.get("type") == "commentCard"
+            ]
+            return sorted(comments, key=lambda c: c["createdAt"])
+        except Exception as e:
+            logger.warning("get_card_comments failed for card '%s': %s", card_id, e)
+            return []
+
     def upload_spec_attachment(self, card_id: str, filename: str, content: str) -> None:
         """
         Upload a markdown file as a card attachment.

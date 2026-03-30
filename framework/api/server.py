@@ -326,7 +326,13 @@ def _run_spec_review_bg(
             return
         logger.info("[spec-review] spec.md saved to %s", spec_path)
 
-        # --- 5. Invoke spec_review_graph ---
+        # --- 5. Fetch Planka comment thread for Q&A detection ---
+        planka_comments: list = []
+        if _planka_sink:
+            planka_comments = _planka_sink.get_card_comments(card_id)
+            logger.info("[spec-review] fetched %d comment(s) from card '%s'", len(planka_comments), card_id)
+
+        # --- 6. Invoke spec_review_graph ---
         initial_state: SpecReviewState = {
             "project_id": project_id,
             "card_id": card_id,
@@ -338,6 +344,8 @@ def _run_spec_review_bg(
             "review_notes": [],
             "status": "in_progress",
             "questions": [],
+            "planka_comments": planka_comments,
+            "has_pending_qa": False,
         }
         graph_config = {
             "configurable": {

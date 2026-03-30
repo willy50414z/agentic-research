@@ -40,6 +40,8 @@ import psycopg
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.postgres import PostgresSaver
 
+from langchain_core.runnables import RunnableConfig
+
 from framework.spec_clarifier import run_spec_agent, parse_spec_md
 from framework.llm_providers import LLMProviderFactory
 
@@ -61,13 +63,15 @@ class SpecReviewState(TypedDict):
     review_notes: list          # list of dicts: {participant, round, questions}
     status: str                 # "in_progress" | "pass" | "need_update" | "abort"
     questions: list             # final questions for user (from synthesizer or abort)
+    planka_comments: list       # raw comment thread from Planka [{text, createdAt}]
+    has_pending_qa: bool        # True if prior Q&A comment + user reply detected
 
 
 # ---------------------------------------------------------------------------
 # Node implementations
 # ---------------------------------------------------------------------------
 
-def _spec_review_init(state: dict, config: dict) -> dict:
+def _spec_review_init(state: dict) -> dict:
     """
     Initialise the spec review state.
     Reads spec file content; sets participants, total_rounds, current_round=0.
@@ -101,28 +105,55 @@ def _spec_review_init(state: dict, config: dict) -> dict:
             "questions": [f"Cannot read spec file: {e}"],
         }
 
+    # Detect prior Q&A: look for a system question comment followed by at least one user reply.
+    _QUESTION_MARKER = "**Spec 審查問題**"
+    comments = state.get("planka_comments") or []
+    question_indices = [
+        i for i, c in enumerate(comments)
+        if _QUESTION_MARKER in c.get("text", "")
+    ]
+    if question_indices and question_indices[-1] < len(comments) - 1:
+        # There is a question comment AND at least one comment after it (user reply).
+        has_pending_qa = True
+        total_rounds = 1
+    else:
+        has_pending_qa = False
+        total_rounds = len(participants) + 1
+
     logger.info(
-        "spec_review_init: project='%s' participants=%s total_rounds=%d",
-        state.get("project_id"), participants, len(participants) + 1,
+        "spec_review_init: project='%s' participants=%s total_rounds=%d has_pending_qa=%s",
+        state.get("project_id"), participants, total_rounds, has_pending_qa,
     )
     return {
         "participants": participants,
-        "total_rounds": len(participants) + 1,
+        "total_rounds": total_rounds,
         "current_round": 0,
         "current_spec_md": current_spec_md,
         "review_notes": [],
         "status": "in_progress",
         "questions": [],
+        "has_pending_qa": has_pending_qa,
     }
 
 
-def _spec_review_round(state: dict, config: dict) -> dict:
+def _format_comment_history(comments: list) -> str:
+    """Format Planka comment thread as a readable block for LLM context."""
+    parts = []
+    for i, c in enumerate(comments, start=1):
+        ts = c.get("createdAt", "")
+        text = c.get("text", "").strip()
+        parts.append(f"=== Comment {i} ({ts}) ===\n{text}")
+    return "\n\n".join(parts) if parts else "(no comments)"
+
+
+def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
     """
     Execute one review round. Role and LLM are determined by current_round.
 
-    Author (round 0):       participants[0],      role="initial"
-    Reviewer (mid rounds):  participants[round],  role="review"
-    Synthesizer (last):     participants[0],      role="synthesize"
+    Refine (has_pending_qa):  participants[0],      role="refine"
+    Author (round 0):         participants[0],      role="initial"
+    Reviewer (mid rounds):    participants[round],  role="review"
+    Synthesizer (last):       participants[0],      role="synthesize"
     """
     participants = state.get("participants", [])
     current_round = state.get("current_round", 0)
@@ -134,7 +165,10 @@ def _spec_review_round(state: dict, config: dict) -> dict:
         return {"status": "abort", "questions": ["No participants — cannot run review round."]}
 
     # Determine role and provider
-    if current_round == 0:
+    if state.get("has_pending_qa") and current_round == 0:
+        role = "refine"
+        provider_name = participants[0]
+    elif current_round == 0:
         role = "initial"
         provider_name = participants[0]
     elif current_round < total_rounds - 1:
@@ -166,12 +200,19 @@ def _spec_review_round(state: dict, config: dict) -> dict:
     else:
         effective_spec_path = spec_path
 
+    comment_history = (
+        _format_comment_history(state.get("planka_comments") or [])
+        if role == "refine"
+        else ""
+    )
+
     result = run_spec_agent(
         spec_path=effective_spec_path,
         llm_fn=llm_fn,
         role=role,
         provider_name=provider_name,
         round_index=current_round,
+        comment_history=comment_history,
     )
 
     # Build state updates
@@ -206,7 +247,7 @@ def _spec_review_round(state: dict, config: dict) -> dict:
     return updates
 
 
-def _spec_finalize(state: dict, config: dict) -> dict:
+def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
     """
     Finalize the spec review.
 
