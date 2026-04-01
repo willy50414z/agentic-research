@@ -167,9 +167,10 @@ def run_once(
             env.setdefault("XDG_CONFIG_HOME", str(runtime_root / "config"))
             env.setdefault("XDG_DATA_HOME",   str(runtime_root / "data"))
             env.setdefault("XDG_STATE_HOME",  str(runtime_root / "state"))
+            # Pass prompt via stdin to avoid Windows console encoding issues with non-ASCII chars
             command = [_resolve_cli("opencode"), "run",
-                       "--dir", effective_dir, "--format", "json",
-                       prompt_file.read_text(encoding=encoding)]
+                       "--dir", effective_dir, "--format", "json", "-"]
+            stdin_input = prompt_file.read_text(encoding=encoding)
 
         elif target == LLMTarget.COPILOT:
             command = [_resolve_cli("copilot"), "-p", prompt_file.read_text(encoding=encoding),
