@@ -40,27 +40,31 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# State schema
+# State schema (狀態定義)
 # ---------------------------------------------------------------------------
 
 class ResearchState(TypedDict):
-    project_id: str
-    loop_index: int
-    loop_goal: str
-    spec: Optional[dict]                # full structured spec injected at start time
-    implementation_plan: Optional[dict]
-    last_result: str                    # PASS | TERMINATE | UNKNOWN
-    last_reason: str
-    max_loops: int                      # from Planka card custom field (default 3)
-    attempt_index: int                  # total analyze calls (incremented by framework wrapper)
-    needs_human_approval: bool
-    attempt_count: int                  # tracks revise→implement attempts within one loop
-    test_metrics: dict                  # latest test result metrics (plugin-defined keys)
-    artifacts: list                     # lightweight refs (local paths or MinIO keys)
+    """
+    這是在 LangGraph 圖表中流轉的「狀態對象」。
+    每一個節點都可以讀取並修改這些資訊。
+    """
+    project_id: str                     # 專案 ID (通常對應 Planka 卡片 ID)
+    loop_index: int                     # 目前的循環索引
+    loop_goal: str                      # 本次循環的具體研究目標
+    spec: Optional[dict]                # 結構化的規格書內容
+    implementation_plan: Optional[dict] # 目前執行的實作計畫
+    last_result: str                    # 最後一次測試判定結果: PASS | FAIL | TERMINATE
+    last_reason: str                    # 判定結果的原因描述
+    max_loops: int                      # 最大允許循環次數 (避免無限循環消耗 Token)
+    attempt_index: int                  # 總嘗試次數 (跨多輪分析累計)
+    needs_human_approval: bool          # 是否需要人工介入審核
+    attempt_count: int                  # 在單一輪循環內 revise→implement 的嘗試次數
+    test_metrics: dict                  # 插件定義的測試量化指標 (如勝率、盈虧比等)
+    artifacts: list                     # 產生的產出物參考 (如檔案路徑或 MinIO Key)
 
 
 # ---------------------------------------------------------------------------
-# Framework wrappers
+# Framework wrappers (框架封裝器)
 # ---------------------------------------------------------------------------
 
 def _make_analyze_wrapper(analyze_fn, db_url: str = None):

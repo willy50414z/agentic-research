@@ -49,26 +49,29 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# State schema
+# State schema (狀態定義)
 # ---------------------------------------------------------------------------
 
 class SpecReviewState(TypedDict):
-    project_id: str
-    card_id: str
-    spec_path: str
-    participants: list          # ordered provider names from LLM_CHAIN
-    current_round: int          # 0-indexed
-    total_rounds: int           # len(participants) + 1
-    current_spec_md: str        # updated by author/synthesizer; reviewer leaves unchanged
-    review_notes: list          # list of dicts: {participant, round, questions}
-    status: str                 # "in_progress" | "pass" | "need_update" | "abort"
-    questions: list             # final questions for user (from synthesizer or abort)
-    planka_comments: list       # raw comment thread from Planka [{text, createdAt}]
-    has_pending_qa: bool        # True if prior Q&A comment + user reply detected
+    """
+    規格審查圖表的狀態定義。
+    """
+    project_id: str             # 專案 ID
+    card_id: str                # Planka 卡片 ID
+    spec_path: str              # 原始規格書檔案路徑
+    participants: list          # 參與審查的 LLM 供應商列表 (來自 LLM_CHAIN 變數)
+    current_round: int          # 目前審查輪次 (從 0 開始)
+    total_rounds: int           # 總輪次數 (通常為 參與者數量 + 1)
+    current_spec_md: str        # 目前最新版的規格書 Markdown 內容
+    review_notes: list          # 審查過程中記錄的意見與提問
+    status: str                 # 狀態: in_progress | pass | need_update | abort
+    questions: list             # 最終需要用戶回答的問題清單
+    planka_comments: list       # 從 Planka 抓取的討論串內容
+    has_pending_qa: bool        # 是否正在等待用戶回覆問題
 
 
 # ---------------------------------------------------------------------------
-# Node implementations
+# Node implementations (節點實作)
 # ---------------------------------------------------------------------------
 
 def _spec_review_init(state: dict) -> dict:
@@ -300,12 +303,15 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
         logger.exception("spec_finalize: parse_spec_md failed: %s", e)
         if sink:
             sink.post_comment(project_id, f"**Spec 解析失敗**\n\n{e}")
-            sink.move_card(project_id, "Planning")
+        _move("Planning")
         return {}
 
     try:
         existing = get_project(project_id, db_url)
-        plugin_name = (existing or {}).get("plugin_name") or parsed.get("plugin") or "quant_alpha"
+        existing_plugin = (existing or {}).get("plugin_name") or ""
+        if existing_plugin == "unknown":
+            existing_plugin = ""
+        plugin_name = existing_plugin or parsed.get("plugin") or "quant_alpha"
         hypothesis  = parsed.get("hypothesis") or state.get("project_id")
 
         create_project(
@@ -324,7 +330,7 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
         logger.exception("spec_finalize: create_project failed: %s", e)
         if sink:
             sink.post_comment(project_id, f"**Project 建立失敗**\n\n{e}")
-            sink.move_card(project_id, "Planning")
+        _move("Planning")
         return {}
 
     _move("Verify")

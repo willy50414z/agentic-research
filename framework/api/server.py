@@ -29,6 +29,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 
 import httpx
 from contextlib import asynccontextmanager
@@ -357,7 +358,11 @@ def _run_spec_review_bg(
         }
         graph = get_or_build_spec_review_graph({"db_url": DATABASE_URL})
         graph.invoke(initial_state, config=graph_config)
+        _clear_review_flag(project_id)
         logger.info("[spec-review] DONE  graph completed for project '%s'.", project_id)
+
+        if spec_path and _planka_sink:
+            _upload_work_dir_files(card_id, str(Path(spec_path).parent))
 
     except Exception as e:
         logger.exception("[spec-review] ERROR  card='%s' unhandled exception: %s", card_name, e)
@@ -369,16 +374,12 @@ _SKIP_UPLOAD = {
     # Flow-control status files — never shown to user
     "status_pass.txt",
     "status_need_update.txt",
-    # Raw LLM stdout debug files — internal, not useful as card attachments
-    "llm_response_primary.txt",
-    "llm_response_secondary.txt",
-    # Files already uploaded inline during spec-review steps 5 & 6
-    "reviewed_spec_primary.md",
-    "reviewed_spec_secondary.md",
     # Original spec — already on the card; re-uploading creates a duplicate
     "spec.md",
     # Rules file copied into work_dir by test scripts
     "spec-review.md",
+    # Working copy written during review rounds — intermediate artifact
+    "current_spec_for_review.md",
 }
 
 
