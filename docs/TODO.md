@@ -1,0 +1,5 @@
+- [ ] projects.quant_alpha.backtest.run_backtest是假的，需要參考E:\code\binance\com\willy\trade_bot\freqtrade\freqtrade_backtest_executor.py或E:\code\binance\com\willy\trade_bot\freqtrade\cross_test_runner.py透過code執行freqtrade測試，並參考E:\code\binance\com\willy\trade_bot\freqtrade\analyze_backtest_result.py解析freqtrade回測結果，產出llm需要的summary
+- [ ] llm 獨立模組透過API呼叫
+- [ ] quant_alpha改名
+- [ ] agent自動review哪些需要歸納成skills/rules/code
+- [ ] docs/USER_MANAGEMENT_PLAN_ZH.md planka多用戶模式

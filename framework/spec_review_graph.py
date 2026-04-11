@@ -13,7 +13,7 @@ Flow:
 Round roles (determined by current_round):
     round == 0:              author     → participants[0],   role="initial"
     0 < round < total - 1:  reviewer   → participants[round], role="review"
-    round == total - 1:     synthesizer → participants[0],   role="synthesize"
+    round == total - 1:     synthesizer → participants[-1],  role="synthesize"
 
 total_rounds = len(participants) + 1
 
@@ -61,7 +61,7 @@ class SpecReviewState(TypedDict):
     spec_path: str              # 原始規格書檔案路徑
     participants: list          # 參與審查的 LLM 供應商列表 (來自 LLM_CHAIN 變數)
     current_round: int          # 目前審查輪次 (從 0 開始)
-    total_rounds: int           # 總輪次數 (通常為 參與者數量 + 1)
+    total_rounds: int           # 總輪次數（固定為 2：initial/refine + synthesize）
     current_spec_md: str        # 目前最新版的規格書 Markdown 內容
     review_notes: list          # 審查過程中記錄的意見與提問
     status: str                 # 狀態: in_progress | pass | need_update | abort
@@ -100,7 +100,7 @@ def _spec_review_init(state: dict) -> dict:
         logger.error("spec_review_init: cannot read spec file '%s': %s", spec_path, e)
         return {
             "participants": participants,
-            "total_rounds": len(participants) + 1,
+            "total_rounds": 2,
             "current_round": 0,
             "current_spec_md": "",
             "review_notes": [],
@@ -118,10 +118,10 @@ def _spec_review_init(state: dict) -> dict:
     if question_indices and question_indices[-1] < len(comments) - 1:
         # There is a question comment AND at least one comment after it (user reply).
         has_pending_qa = True
-        total_rounds = 1
+        total_rounds = 2  # refine (llm-1) + synthesize (llm-2)
     else:
         has_pending_qa = False
-        total_rounds = len(participants) + 1
+        total_rounds = 2  # initial (llm-1) + synthesize (llm-2)
 
     logger.info(
         "spec_review_init: project='%s' participants=%s total_rounds=%d has_pending_qa=%s",
@@ -139,24 +139,41 @@ def _spec_review_init(state: dict) -> dict:
     }
 
 
-def _format_comment_history(comments: list) -> str:
-    """Format Planka comment thread as a readable block for LLM context."""
+def _format_qa_history(comments: list) -> str:
+    """
+    Extract the last spec-review Q&A exchange from the Planka comment thread.
+
+    Returns only:
+      - The last comment containing _QUESTION_MARKER (the system's questions)
+      - All comments after it (the user's replies)
+
+    This avoids passing unrelated earlier discussion to the LLM.
+    """
+    _QUESTION_MARKER = "**Spec 審查問題**"
+    last_q_index = None
+    for i, c in enumerate(comments):
+        if _QUESTION_MARKER in c.get("text", ""):
+            last_q_index = i
+
+    if last_q_index is None:
+        return "(no spec review questions found)"
+
+    relevant = comments[last_q_index:]
     parts = []
-    for i, c in enumerate(comments, start=1):
-        ts = c.get("createdAt", "")
+    for c in relevant:
+        ts   = c.get("createdAt", "")
         text = c.get("text", "").strip()
-        parts.append(f"=== Comment {i} ({ts}) ===\n{text}")
-    return "\n\n".join(parts) if parts else "(no comments)"
+        parts.append(f"=== {ts} ===\n{text}")
+    return "\n\n".join(parts)
 
 
 def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
     """
     Execute one review round. Role and LLM are determined by current_round.
 
-    Refine (has_pending_qa):  participants[0],      role="refine"
-    Author (round 0):         participants[0],      role="initial"
-    Reviewer (mid rounds):    participants[round],  role="review"
-    Synthesizer (last):       participants[0],      role="synthesize"
+    Refine (has_pending_qa):  participants[0],   role="refine"
+    Author (round 0):         participants[0],   role="initial"
+    Synthesizer (last):       participants[-1],  role="synthesize"
     """
     participants = state.get("participants", [])
     current_round = state.get("current_round", 0)
@@ -174,12 +191,9 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
     elif current_round == 0:
         role = "initial"
         provider_name = participants[0]
-    elif current_round < total_rounds - 1:
-        role = "review"
-        provider_name = participants[current_round]
     else:
         role = "synthesize"
-        provider_name = participants[0]
+        provider_name = participants[-1]
 
     logger.info(
         "spec_review_round: project='%s' round=%d/%d role=%s provider=%s",
@@ -194,9 +208,37 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
             "check LLM_CHAIN and ensure the provider is available."
         )
 
-    # For review/synthesize roles, the spec_path is the current working spec
-    # We write the current spec content to a temp file in work_dir so run_spec_agent reads it
-    if role in ("review", "synthesize"):
+    # Determine which spec file to pass to the agent.
+    # refine: read the already-reviewed initial draft, not the raw spec
+    # synthesize: read the spec produced by the author/refine round (stored in state)
+    if role == "refine":
+        reviewed_final   = Path(work_dir) / "reviewed_spec_final.md"
+        reviewed_initial = Path(work_dir) / "reviewed_spec_initial.md"
+        if reviewed_final.exists():
+            # Second or later refine: build on the previous refine/synthesize output.
+            effective_spec_path = str(reviewed_final)
+            logger.info("spec_review_round: refine using reviewed_spec_final.md as base.")
+        elif reviewed_initial.exists():
+            # First refine after initial round (edge-case: synthesize did not run yet).
+            effective_spec_path = str(reviewed_initial)
+            logger.warning(
+                "spec_review_round: reviewed_spec_final.md not found, "
+                "falling back to reviewed_spec_initial.md."
+            )
+        else:
+            logger.error(
+                "spec_review_round: refine path requires reviewed_spec_final.md or "
+                "reviewed_spec_initial.md but neither found in '%s' — aborting.",
+                work_dir,
+            )
+            return {
+                "status": "abort",
+                "questions": [
+                    f"Refine 路徑找不到上一輪審查產出（reviewed_spec_final.md 或 reviewed_spec_initial.md）。"
+                    "請確認首次審查是否已正常完成，或重新將卡片移回 Spec Pending Review 觸發完整審查。"
+                ],
+            }
+    elif role == "synthesize":
         current_spec_path = Path(work_dir) / "current_spec_for_review.md"
         current_spec_path.write_text(state.get("current_spec_md", ""), encoding="utf-8")
         effective_spec_path = str(current_spec_path)
@@ -204,7 +246,7 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
         effective_spec_path = spec_path
 
     comment_history = (
-        _format_comment_history(state.get("planka_comments") or [])
+        _format_qa_history(state.get("planka_comments") or [])
         if role == "refine"
         else ""
     )

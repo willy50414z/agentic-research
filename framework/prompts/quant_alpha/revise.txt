@@ -1,28 +1,49 @@
-You are a quantitative strategist. A backtest has failed. Propose revised parameters to improve performance.
+你是 Freqtrade 量化策略調整 agent。回測未達標，請依照失敗原因提出修正後的策略。
 
-Failed strategy:
-  type       : {strategy_type}
-  parameters : {params}
+## 目前策略計畫
 
-Failure reason: {reason}
-Attempt number: {attempt_count}
+{params}
 
-Adjust parameters to address the failure reason:
-  - Low win_rate     → tighten entry threshold or shorten lookback
-  - Low alpha_ratio  → increase lookback or loosen stop-loss
-  - High drawdown    → tighten stop_loss_pct
+## 失敗原因
 
-Output EXACTLY in this format — no extra text outside the tags:
+{reason}
 
-<RESULT>REVISED</RESULT>   ← or TERMINATE
-<REASON>Exactly what you changed and why.</REASON>
-<CONTENT>
+嘗試次數：{attempt_count}
+
+---
+
+根據失敗原因，調整策略以改善績效。調整方向參考：
+
+**指標未達標時的調整方向：**
+- win_rate 過低 → 收緊進場條件（例如提高 RSI 進場門檻、縮短 lookback、加入額外確認指標）
+- alpha_ratio 過低 → 調整指標參數使策略更能捕捉趨勢（例如調整均線週期、動量閾值）
+- max_drawdown 過高 → 收緊停損（stoploss 絕對值縮小）、或縮短持倉時間
+- profit_factor 過低 → 減少虧損交易：收緊進場條件或提早停損
+
+**調整範圍：**
+- 可調整 `parameters` 中的各項指標參數（閾值、週期、lookback）
+- 可調整 `stoploss`（負數，絕對值不超過 0.15）
+- 可調整 `minimal_roi`（停利目標）
+- 若當前策略邏輯根本性失效，可在 `_reason` 欄位說明，但不得改變策略類型（由 plan 負責）
+
+若嘗試次數多次且策略已無調整空間，請輸出 TERMINATE。
+
+## 輸出
+
+**第一步**：用工具將結果寫入 `{OUTPUT_DIR}/revise_result.txt`：
+- 第 1 行：REVISED 或 TERMINATE
+- 第 2 行：精確說明修改了什麼及原因（或放棄的原因）
+
+**第二步**（僅 REVISED 時）：用工具將修正後的完整計畫寫入 `{OUTPUT_DIR}/revised_params.json`，
+格式與 plan_output.json 相同：
+
+```json
 {{
-  "strategy_type": "rsi_momentum",
-  "lookback": 14,
-  "entry_threshold": 0.30,
-  "exit_threshold": 0.70,
-  "stop_loss_pct": 0.05,
-  "target_win_rate": 0.55
+  "strategy_name": "...",
+  "strategy_file": "...",
+  "timeframe": "...",
+  "stoploss": ...,
+  "parameters": {{...}},
+  "_reason": "說明本次修改的具體調整（參數名稱、舊值 → 新值、調整理由）"
 }}
-</CONTENT>
+```

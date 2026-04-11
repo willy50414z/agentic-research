@@ -502,7 +502,7 @@ class TestPromptContent:
     """TC-P09 (prompt) — Verify prompts no longer contain conflicting TERMINATE instructions."""
 
     def _load_prompt(self, name: str) -> str:
-        path = Path(_ROOT) / "projects" / "quant_alpha" / "prompts" / f"{name}.txt"
+        path = Path(_ROOT) / "framework" / "prompts" / "quant_alpha" / f"{name}.txt"
         return path.read_text(encoding="utf-8")
 
     def test_analyze_prompt_no_loop_index_terminate_instruction(self):

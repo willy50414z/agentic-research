@@ -38,6 +38,12 @@ from .plugin_interface import ResearchPlugin
 
 logger = logging.getLogger(__name__)
 
+_PROMPTS_DIR = Path(__file__).parent / "prompts" / "quant_alpha"
+
+
+def _load_prompt(name: str) -> str:
+    return (_PROMPTS_DIR / f"{name}.txt").read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # State schema (狀態定義)
@@ -268,34 +274,7 @@ def _build_final_summary_prompt(rows: list[dict], n: int, goal: str) -> str:
             f"\n第 {i} 輪：result={result}, {metrics_str}\n  原因：{reason}\n"
         )
 
-    return f"""你是量化策略研究助理，請根據以下多輪研究資料，用繁體中文產出一份完整的研究總結報告。
-
-研究目標：{goal}
-總執行輪數：{n}
-
-各輪資料：
-{rows_text}
-
-請按以下格式輸出 Markdown 報告（直接輸出報告內容，不要加任何前綴說明）：
-
-# 研究總結報告
-
-## 概述
-（整體 {n} 輪研究的結論摘要，說明是否達到研究目標）
-
-## 各輪詳情
-
-（對每一輪按以下格式輸出）
-
-### 第 N 輪
-- **測試目標**：本輪的具體策略目標或假設
-- **測試結果**：量化指標數據（win_rate、alpha_ratio、max_drawdown 等）
-- **結果判定**：PASS / FAIL / TERMINATE
-- **改善方向**：下一步建議的改進方向
-
-## 整體結論與建議下一步
-（綜合所有輪次的發現，給出明確的後續策略建議）
-"""
+    return _load_prompt("final_summary").format(goal=goal, n=n, rows_text=rows_text)
 
 
 def _fallback_summary(rows: list[dict], n: int, goal: str) -> str:

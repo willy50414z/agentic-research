@@ -3,17 +3,17 @@ framework/spec_clarifier.py
 
 Dual-LLM spec-writing agent for the Planka-first workflow.
 
-Flow:
-  1. Primary agent reads spec.md and .ai/rules/spec-review.md from cwd, writes
-     reviewed_spec.md and a status file (status_pass.txt or status_need_update.txt).
-  2. Secondary agent repeats the same protocol on the primary's output.
-  3. Framework detects outcome by checking which status file exists in work_dir.
-  4. Framework parses final reviewed_spec.md with regex to extract structured fields.
+Flow (fixed 2-round model):
+  Round 0 — Author (participants[0]):
+    - First review:  role="initial"  → writes reviewed_spec_initial.md
+    - Re-review:     role="refine"   → writes reviewed_spec_final.md (with Q&A context)
+  Round 1 — Synthesizer (participants[-1]):
+    - role="synthesize" → reads initial spec, writes reviewed_spec_final.md
 
 Status detection:
-  status_pass.txt present      → needs_user_input = False
+  status_pass.txt present        → needs_user_input = False
   status_need_update.txt present → needs_user_input = True; questions from file lines
-  neither present              → fallback to _parse_agent_response on stdout text
+  neither present                → treated as protocol violation (needs_user_input=True)
 """
 
 import logging
@@ -58,10 +58,10 @@ def run_spec_agent(
     Args:
         spec_path: Local path to the spec.md file.
         llm_fn:    Callable(prompt: str) -> str.  If None, returns conservative fallback.
-        role:      "primary" or "secondary" — selects prompt template.
+        role:      "initial", "refine", or "synthesize" — selects prompt template.
 
     Returns:
-        SpecAgentResult with enhanced_spec_md (metadata block stripped) and parsed metadata.
+        SpecAgentResult with enhanced_spec_md and parsed metadata.
     """
     original_spec = _read_spec_file(spec_path)
     work_dir = str(Path(spec_path).parent)
@@ -80,27 +80,26 @@ def run_spec_agent(
     for stale in ("status_pass.txt", "status_need_update.txt"):
         Path(work_dir, stale).unlink(missing_ok=True)
 
-    rules_path  = str((Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
-    plugin_dir  = str((Path(__file__).parent.parent / "projects" / "quant_alpha").resolve())
+    def _read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning("Could not read '%s': %s", path, e)
+            return ""
 
-    # Build review_notes block for synthesize role
-    review_notes_block = ""
-    if role == "synthesize":
-        notes_files = sorted(Path(work_dir).glob("review_notes_round*.txt"))
-        parts = []
-        for nf in notes_files:
-            parts.append(f"=== {nf.name} ===\n{nf.read_text(encoding='utf-8').strip()}")
-        review_notes_block = "\n\n".join(parts) if parts else "(no reviewer notes)"
+    constraints = _read(Path(__file__).parent.parent / ".ai" / "rules" / "spec-review-agent-constraints.md")
+    rules       = _read(Path(__file__).parent.parent / ".ai" / "rules" / "spec-review.md")
+    sample_spec = _read(Path(__file__).parent / "prompts" / "spec_review" / "sample_spec.md")
 
     prompt_template = _load_prompt(role)
     prompt = (
         prompt_template
-        .replace("{SPEC_PATH}",        spec_path)
+        .replace("{SPEC}",             original_spec)
         .replace("{OUTPUT_DIR}",       work_dir)
-        .replace("{RULES_PATH}",       rules_path)
-        .replace("{PLUGIN_DIR}",       plugin_dir)
+        .replace("{CONSTRAINTS}",      constraints)
+        .replace("{RULES}",            rules)
+        .replace("{SAMPLE_SPEC}",      sample_spec)
         .replace("{ROUND_INDEX}",      str(round_index))
-        .replace("{REVIEW_NOTES}",     review_notes_block)
         .replace("{COMMENT_HISTORY}",  comment_history)
     )
 
@@ -131,28 +130,8 @@ def run_spec_agent(
             agent_notes=f"LLM error: {e}",
         )
 
-    # --- review role: read review_notes file, return without spec update ---
-    if role == "review":
-        notes_filename = f"review_notes_round{round_index}.txt"
-        notes_path = Path(work_dir) / notes_filename
-        if notes_path.exists():
-            notes_text = notes_path.read_text(encoding="utf-8").strip()
-            questions = [line.strip() for line in notes_text.splitlines() if line.strip()]
-        else:
-            logger.warning("run_spec_agent [review] notes file '%s' not found.", notes_path)
-            questions = ["Reviewer did not produce a notes file."]
-        return SpecAgentResult(
-            needs_user_input=False,
-            questions=questions,
-            enhanced_spec_md=original_spec,   # reviewer does not change the spec
-            domain=_extract_domain_from_spec(original_spec),
-            agent_notes=f"Round {round_index} review by {provider_name or 'unknown'}.",
-        )
-
     # Read the role-specific reviewed spec written by the agent, if present.
     _role_output_map = {
-        "primary":    "reviewed_spec_primary.md",    # legacy
-        "secondary":  "reviewed_spec_secondary.md",  # legacy
         "initial":    "reviewed_spec_initial.md",
         "synthesize": "reviewed_spec_final.md",
         "refine":     "reviewed_spec_final.md",
@@ -339,59 +318,36 @@ def _read_spec_file(spec_path: str) -> str:
 
 
 def _load_prompt(role: str) -> str:
-    """Load system prompt from framework/prompts/ directory.
+    """Load system prompt from framework/prompts/spec_review/ directory.
 
-    Role aliases:
-      'initial'    → spec_agent_initial.txt   (falls back to spec_agent_primary.txt)
-      'primary'    → spec_agent_primary.txt   (legacy)
-      'secondary'  → spec_agent_secondary.txt (legacy)
-      'review'     → spec_agent_review.txt
-      'synthesize' → spec_agent_synthesize.txt
+    Supported roles: initial, refine, synthesize.
     """
-    prompts_dir = Path(__file__).parent / "prompts"
-    candidates = [prompts_dir / f"spec_agent_{role}.txt"]
-    # Fallback alias: initial → primary
-    if role == "initial":
-        candidates.append(prompts_dir / "spec_agent_primary.txt")
-    # Fallback alias: refine → synthesize (both refine from Q&A context)
-    if role == "refine":
-        candidates.append(prompts_dir / "spec_agent_synthesize.txt")
-    for prompt_file in candidates:
-        if prompt_file.exists():
-            return prompt_file.read_text(encoding="utf-8")
-    logger.warning("Prompt file not found for role '%s' — using inline fallback.", role)
-    return (
-        "You are a research specification agent. "
-        "Rewrite the given spec.md to be complete and executable. "
-        "End your response with:\n"
-        "<!-- AGENT_META\n"
-        "needs_user_input: false\n"
-        "domain: <domain>\n"
-        "questions: []\n"
-        "agent_notes: <what you did>\n"
-        "-->"
-    )
+    prompts_dir = Path(__file__).parent / "prompts" / "spec_review"
+    prompt_file = prompts_dir / f"spec_agent_{role}.txt"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8")
+    logger.warning("Prompt file not found for role '%s'.", role)
+    return ""
 
 
 def _gemini_prefix(role: str, work_dir: str, round_index: int) -> str:
     """Return Gemini-specific output constraint prefix for a given role."""
-    if role in ("initial", "primary"):
+    if role == "initial":
         return (
             "STRICT RULE: write exactly two files and nothing else."
-            f" File 1: reviewed_spec_{'initial' if role == 'initial' else 'primary'}.md"
-            f" at the path stated in the prompt ({work_dir})."
+            f" File 1: reviewed_spec_initial.md at the path stated in the prompt ({work_dir})."
             " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
             " OR status_need_update.txt (one question per line) if questions exist."
             " Do NOT create any other file, directory, script, or code."
             " Do NOT implement any software. Do NOT run shell commands."
             " Use write_file tool. Do NOT print file contents to stdout.\n\n"
         )
-    if role == "review":
+    if role == "refine":
         return (
-            "STRICT RULE: write exactly one file and nothing else."
-            f" File: review_notes_round{round_index}.txt"
-            f" at the path stated in the prompt ({work_dir})."
-            " Each line must be one review comment or question (plain text, no markdown)."
+            "STRICT RULE: write exactly two files and nothing else."
+            f" File 1: reviewed_spec_final.md at the path stated in the prompt ({work_dir})."
+            " File 2: EITHER status_pass.txt (content: PASS) if no clarification questions,"
+            " OR status_need_update.txt (one question per line) if questions exist."
             " Do NOT create any other file, directory, script, or code."
             " Do NOT implement any software. Do NOT run shell commands."
             " Use write_file tool. Do NOT print file contents to stdout.\n\n"

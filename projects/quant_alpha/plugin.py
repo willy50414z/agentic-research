@@ -27,7 +27,6 @@ from langgraph.types import interrupt
 
 from framework.plugin_interface import ResearchPlugin
 from framework.plugin_registry import register
-from framework.tag_parser import _extract_tag
 from framework.llm_agent.llm_svc import run_once
 from framework.llm_agent.llm_target import LLMTarget
 from projects.quant_alpha.backtest import run_backtest
@@ -64,26 +63,14 @@ def _mlflow_log(project_id: str, loop: int, plan: dict, metrics: dict, result: s
         logger.warning("[QuantAlpha] mlflow log failed (loop=%d): %s", loop, e)
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "framework" / "prompts" / "quant_alpha"
 
-# Default strategy used by rule-based fallback when LLM is unavailable.
-# Seeds are MD5-stable, so results are reproducible across processes.
-_FALLBACK_STRATEGIES = [
-    # Loop 0 — hard start: win=0.50 at n=350→400 → triggers FAIL→revise
-    #   After rule-based revise (lb-4, entry-0.05, exit+0.05) → loop0-revised below
-    {"strategy_type": "rsi_momentum", "lookback": 14, "entry_threshold": 0.35,
-     "exit_threshold": 0.55, "stop_loss_pct": 0.08, "target_win_rate": 0.55},
-    # Loop 1 — robust PASS: win=0.75 alpha=2.08 dd=0.08 at n=350..1000
-    {"strategy_type": "rsi_momentum", "lookback": 20, "entry_threshold": 0.30,
-     "exit_threshold": 0.60, "stop_loss_pct": 0.08, "target_win_rate": 0.55},
-    # Loop 2 — high-trade PASS: win=0.71 alpha=1.73 dd=0.10 at n=350
-    {"strategy_type": "rsi_momentum", "lookback":  5, "entry_threshold": 0.15,
-     "exit_threshold": 0.70, "stop_loss_pct": 0.08, "target_win_rate": 0.55},
-]
-# Loop 0 after one revise becomes: lb=10, entry=0.30, exit=0.60, sl=0.08
-# → PASS: win=0.67 alpha=1.10 dd=0.08 at n=350
+_PASS_WIN_RATE      = 0.55
+_PASS_ALPHA         = 1.0
+_PASS_MAX_DD        = 0.20
+_PASS_PROFIT_FACTOR = 1.2
 
-_PASS_WIN_RATE    = 0.55
-_PASS_ALPHA       = 1.0
-_PASS_MAX_DD      = 0.20
+_RULES_PATH = str(
+    (Path(__file__).parent.parent.parent / ".ai" / "rules" / "backtest-required-metrics.md").resolve()
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,21 +82,20 @@ def _load_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _call_llm(prompt: str) -> str:
+def _call_llm(prompt: str, cwd: str | None = None) -> str:
     """
     Call Claude CLI via run_once. Returns raw stdout.
     Raises FileNotFoundError when Claude is not installed — caller must handle.
     """
-    return run_once(LLMTarget.CLAUDE, prompt, timeout=120)
+    return run_once(LLMTarget.CLAUDE, prompt, timeout=120, cwd=cwd)
 
 
-def _parse_plan(raw: str) -> dict:
-    """Extract JSON strategy dict from <CONTENT> tag."""
-    content = _extract_tag(raw, "CONTENT") or ""
+def _read_json_file(path: Path) -> dict:
+    """Read a JSON file from disk. Returns empty dict on failure."""
     try:
-        return json.loads(content)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Could not parse plan JSON from LLM output, using fallback.")
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Could not read JSON from '%s': %s", path, e)
         return {}
 
 
@@ -135,35 +121,39 @@ class QuantAlphaPlugin(ResearchPlugin):
 
         logger.info("[QuantAlpha] plan  loop=%d", loop)
 
+        output_dir    = str(ARTIFACTS_DIR.resolve())
+        strategy_dir  = str((ARTIFACTS_DIR / "strategies").resolve())
+        spec          = state.get("spec") or {}
+        spec_md       = spec.get("raw_md", "（spec 未提供）")
+
         prompt = _load_prompt("plan").format(
-            goal=goal,
-            loop_index=loop,
-            last_decision="none",
+            SPEC          = spec_md,
+            loop_index    = loop,
+            last_decision = state.get("last_reason", "none"),
+            STRATEGY_DIR  = strategy_dir,
+            OUTPUT_DIR    = output_dir,
         )
 
         plan = {}
         try:
-            raw  = _call_llm(prompt)
-            plan = _parse_plan(raw)
-            logger.info("[QuantAlpha] plan  LLM strategy=%s", plan.get("strategy_type"))
+            _call_llm(prompt, cwd=output_dir)
+            plan = _read_json_file(Path(output_dir) / "plan_output.json")
+            logger.info("[QuantAlpha] plan  LLM strategy=%s", plan.get("strategy_name"))
         except (FileNotFoundError, RuntimeError) as e:
             logger.warning("[QuantAlpha] plan  LLM unavailable (%s) — using fallback", e)
-            plan = dict(_FALLBACK_STRATEGIES[loop % len(_FALLBACK_STRATEGIES)])
+        if not plan:
+            logger.warning("[QuantAlpha] plan  file empty or unreadable — using fallback")
+            plan = {"strategy_name": "FallbackRsiMomentum", "stoploss": -0.05, "parameters": {}}
 
-        # Ensure required keys have safe defaults
-        plan.setdefault("strategy_type",   "rsi_momentum")
-        plan.setdefault("lookback",        14)
-        plan.setdefault("entry_threshold", 0.30)
-        plan.setdefault("exit_threshold",  0.70)
-        plan.setdefault("stop_loss_pct",   0.05)
-        plan.setdefault("target_win_rate", _PASS_WIN_RATE)
+        plan.setdefault("strategy_name", "UnknownStrategy")
+        plan.setdefault("stoploss",      -0.05)
 
         return {
             "loop_goal":            goal,
             "implementation_plan":  plan,
             "needs_human_approval": False,
             "last_result":          "PLAN_READY",
-            "last_reason":          f"Plan selected: {plan.get('strategy_type', '?')}.",
+            "last_reason":          f"Plan: {plan.get('strategy_name', '?')}.",
         }
 
     # ── implement ─────────────────────────────────────────────────────────────
@@ -221,11 +211,12 @@ class QuantAlphaPlugin(ResearchPlugin):
         return {
             "attempt_count": attempt,
             "test_metrics": {
-                "win_rate":     result["win_rate"],
-                "alpha_ratio":  result["alpha_ratio"],
-                "max_drawdown": result["max_drawdown"],
-                "n_trades":     result["n_trades"],
-                "total_return": result["total_return"],
+                "win_rate":      result["win_rate"],
+                "alpha_ratio":   result["alpha_ratio"],
+                "max_drawdown":  result["max_drawdown"],
+                "n_trades":      result["n_trades"],
+                "total_return":  result["total_return"],
+                "profit_factor": result.get("profit_factor", 0.0),
             },
         }
 
@@ -241,25 +232,39 @@ class QuantAlphaPlugin(ResearchPlugin):
         if state.get("last_result") == "TERMINATE":
             return {"last_result": "TERMINATE", "last_reason": state.get("last_reason", "")}
 
+        output_dir      = str(ARTIFACTS_DIR.resolve())
+        target_pf       = (
+            (state.get("spec") or {}).get("performance", {}).get("is_profit_factor")
+            or _PASS_PROFIT_FACTOR
+        )
         prompt = _load_prompt("analyze").format(
-            strategy_type  = plan.get("strategy_type", "?"),
-            params         = json.dumps({k: v for k, v in plan.items()
-                                         if k != "target_win_rate"}),
-            win_rate       = metrics.get("win_rate", 0),
-            alpha_ratio    = metrics.get("alpha_ratio", 0),
-            max_drawdown   = metrics.get("max_drawdown", 0),
-            n_trades       = metrics.get("n_trades", 0),
-            target_win_rate= plan.get("target_win_rate", _PASS_WIN_RATE),
-            loop_index     = loop,
+            strategy_name        = plan.get("strategy_name", "?"),
+            params               = json.dumps({k: v for k, v in plan.items()
+                                               if k != "target_win_rate"}),
+            win_rate             = metrics.get("win_rate", 0),
+            alpha_ratio          = metrics.get("alpha_ratio", 0),
+            max_drawdown         = metrics.get("max_drawdown", 0),
+            profit_factor        = metrics.get("profit_factor", 0.0),
+            n_trades             = metrics.get("n_trades", 0),
+            target_win_rate      = plan.get("target_win_rate", _PASS_WIN_RATE),
+            target_profit_factor = target_pf,
+            loop_index           = loop,
+            RULES_PATH           = _RULES_PATH,
+            OUTPUT_DIR           = output_dir,
         )
 
         try:
-            raw    = _call_llm(prompt)
-            result = (_extract_tag(raw, "RESULT") or "FAIL").strip().upper()
-            reason = (_extract_tag(raw, "REASON") or "").strip()
+            _call_llm(prompt, cwd=output_dir)
+            result_file = Path(output_dir) / "analyze_result.txt"
+            lines  = result_file.read_text(encoding="utf-8").strip().splitlines()
+            result = (lines[0].strip().upper() if lines else "FAIL")
+            reason = (lines[1].strip() if len(lines) > 1 else "")
             logger.info("[QuantAlpha] analyze  LLM result=%s", result)
         except (FileNotFoundError, RuntimeError) as e:
             logger.warning("[QuantAlpha] analyze  LLM unavailable (%s) — rule-based fallback", e)
+            result, reason = self._rule_based_analyze(loop, plan, metrics)
+        except Exception as e:
+            logger.warning("[QuantAlpha] analyze  file read failed (%s) — rule-based fallback", e)
             result, reason = self._rule_based_analyze(loop, plan, metrics)
 
         if result not in ("PASS", "FAIL", "TERMINATE"):
@@ -283,21 +288,25 @@ class QuantAlphaPlugin(ResearchPlugin):
         return {"last_result": result, "last_reason": reason}
 
     def _rule_based_analyze(self, loop, plan, metrics):
-        win_rate    = metrics.get("win_rate", 0)
-        alpha_ratio = metrics.get("alpha_ratio", 0)
-        max_dd      = metrics.get("max_drawdown", 1)
-        target_wr   = plan.get("target_win_rate", _PASS_WIN_RATE)
+        win_rate      = metrics.get("win_rate", 0)
+        alpha_ratio   = metrics.get("alpha_ratio", 0)
+        max_dd        = metrics.get("max_drawdown", 1)
+        profit_factor = metrics.get("profit_factor", 0.0)
+        target_wr     = plan.get("target_win_rate", _PASS_WIN_RATE)
 
-        if win_rate >= target_wr and alpha_ratio >= _PASS_ALPHA and max_dd <= _PASS_MAX_DD:
+        if (win_rate >= target_wr and alpha_ratio >= _PASS_ALPHA
+                and max_dd <= _PASS_MAX_DD and profit_factor >= _PASS_PROFIT_FACTOR):
             return "PASS", (
                 f"win_rate={win_rate:.4f} ≥ {target_wr}  "
                 f"alpha={alpha_ratio:.4f} ≥ 1.0  "
-                f"drawdown={max_dd:.4f} ≤ 0.20"
+                f"drawdown={max_dd:.4f} ≤ 0.20  "
+                f"profit_factor={profit_factor:.4f} ≥ {_PASS_PROFIT_FACTOR}"
             )
         fails = []
-        if win_rate    < target_wr:    fails.append(f"win_rate={win_rate:.4f} < {target_wr}")
-        if alpha_ratio < _PASS_ALPHA:  fails.append(f"alpha={alpha_ratio:.4f} < 1.0")
-        if max_dd      > _PASS_MAX_DD: fails.append(f"drawdown={max_dd:.4f} > 0.20")
+        if win_rate      < target_wr:           fails.append(f"win_rate={win_rate:.4f} < {target_wr}")
+        if alpha_ratio   < _PASS_ALPHA:         fails.append(f"alpha={alpha_ratio:.4f} < 1.0")
+        if max_dd        > _PASS_MAX_DD:        fails.append(f"drawdown={max_dd:.4f} > 0.20")
+        if profit_factor < _PASS_PROFIT_FACTOR: fails.append(f"profit_factor={profit_factor:.4f} < {_PASS_PROFIT_FACTOR}")
         return "FAIL", "Failed: " + "; ".join(fails)
 
     # ── revise ────────────────────────────────────────────────────────────────
@@ -313,48 +322,41 @@ class QuantAlphaPlugin(ResearchPlugin):
             return {"last_result": "TERMINATE",
                     "last_reason": f"Max revision attempts ({attempt}) reached."}
 
+        output_dir = str(ARTIFACTS_DIR.resolve())
         prompt = _load_prompt("revise").format(
-            strategy_type = plan.get("strategy_type", "?"),
-            params        = json.dumps({k: v for k, v in plan.items()
-                                        if k != "target_win_rate"}),
+            params        = json.dumps(plan, ensure_ascii=False, indent=2),
             reason        = reason,
             attempt_count = attempt,
+            OUTPUT_DIR    = output_dir,
         )
 
         revised = {}
         try:
-            raw    = _call_llm(prompt)
-            result = (_extract_tag(raw, "RESULT") or "").strip().upper()
-            reason = (_extract_tag(raw, "REASON") or reason).strip()
+            _call_llm(prompt, cwd=output_dir)
+            result_file = Path(output_dir) / "revise_result.txt"
+            lines  = result_file.read_text(encoding="utf-8").strip().splitlines()
+            result = (lines[0].strip().upper() if lines else "TERMINATE")
+            reason = (lines[1].strip() if len(lines) > 1 else reason)
             if result == "TERMINATE":
                 return {"last_result": "TERMINATE", "last_reason": reason}
-            revised = _parse_plan(raw)
+            revised = _read_json_file(Path(output_dir) / "revised_params.json")
             logger.info("[QuantAlpha] revise  LLM revised strategy=%s",
                         revised.get("strategy_type"))
         except (FileNotFoundError, RuntimeError) as e:
             logger.warning("[QuantAlpha] revise  LLM unavailable (%s) — rule-based fallback", e)
+        except Exception as e:
+            logger.warning("[QuantAlpha] revise  file read failed (%s) — rule-based fallback", e)
 
         if not revised:
-            # Rule-based: converge toward known-good params
-            # (lower entry_threshold → more selective entries → higher win_rate)
+            # Rule-based fallback: tighten stoploss slightly
             revised = dict(plan)
-            revised["lookback"] = max(3, plan.get("lookback", 14) - 4)
-            revised["entry_threshold"] = round(
-                max(0.20, plan.get("entry_threshold", 0.30) - 0.05), 2)
-            revised["exit_threshold"] = round(
-                min(0.80, plan.get("exit_threshold", 0.70) + 0.05), 2)
-            reason = (f"Shortened lookback to {revised['lookback']}, "
-                      f"tightened entry_threshold to {revised['entry_threshold']}.")
+            revised["stoploss"] = round(max(-0.02, plan.get("stoploss", -0.05) + 0.01), 3)
+            reason = f"Tightened stoploss to {revised['stoploss']} (rule-based fallback)."
 
         logger.info(
-            "[QuantAlpha] revise  ↻ params changed: "
-            "lookback %s→%s  entry %.2f→%.2f  exit %.2f→%.2f",
-            plan.get("lookback"), revised.get("lookback"),
-            plan.get("entry_threshold", 0), revised.get("entry_threshold", 0),
-            plan.get("exit_threshold", 0), revised.get("exit_threshold", 0),
+            "[QuantAlpha] revise  ↻ strategy=%s stoploss %s→%s",
+            revised.get("strategy_name"), plan.get("stoploss"), revised.get("stoploss"),
         )
-
-        revised.setdefault("target_win_rate", plan.get("target_win_rate", _PASS_WIN_RATE))
 
         return {
             "implementation_plan":  revised,
@@ -373,29 +375,36 @@ class QuantAlphaPlugin(ResearchPlugin):
 
         new_loop_index = loop + 1
 
+        output_dir = str(ARTIFACTS_DIR.resolve())
         prompt = _load_prompt("summarize").format(
             project_id    = state.get("project_id", "?"),
             goal          = goal,
             loop_index    = loop,
-            strategy_type = plan.get("strategy_type", "?"),
-            params        = json.dumps({k: v for k, v in plan.items()
-                                        if k != "target_win_rate"}),
+            strategy_name = plan.get("strategy_name", "?"),
+            params        = json.dumps(plan, ensure_ascii=False, indent=2),
             win_rate      = metrics.get("win_rate", 0),
             alpha_ratio   = metrics.get("alpha_ratio", 0),
             max_drawdown  = metrics.get("max_drawdown", 0),
+            profit_factor = metrics.get("profit_factor", 0.0),
             n_trades      = metrics.get("n_trades", 0),
             total_return  = metrics.get("total_return", 0),
+            OUTPUT_DIR    = output_dir,
         )
 
         report_md = ""
         summary   = ""
         try:
-            raw       = _call_llm(prompt)
-            report_md = (_extract_tag(raw, "CONTENT") or "").strip()
-            summary   = (_extract_tag(raw, "REASON")  or "").strip()
+            _call_llm(prompt, cwd=output_dir)
+            summary_file = Path(output_dir) / "loop_summary.md"
+            report_md = summary_file.read_text(encoding="utf-8").strip()
+            # Extract first line summary (_摘要：..._) if present
+            first_line = report_md.splitlines()[0] if report_md else ""
+            summary = first_line.strip("_").replace("摘要：", "").strip() if "摘要" in first_line else ""
             logger.info("[QuantAlpha] summarize  LLM report generated (%d chars)", len(report_md))
         except (FileNotFoundError, RuntimeError) as e:
             logger.warning("[QuantAlpha] summarize  LLM unavailable (%s) — generating report", e)
+        except Exception as e:
+            logger.warning("[QuantAlpha] summarize  file read failed (%s) — generating report", e)
 
         if not report_md:
             report_md = (
@@ -457,25 +466,34 @@ class QuantAlphaPlugin(ResearchPlugin):
             )
         attempts_table = "\n".join(attempts_lines) if attempts_lines else "  (no attempts recorded)"
 
+        output_dir = str(ARTIFACTS_DIR.resolve())
         prompt = _load_prompt("terminate_summary").format(
             project_id      = state.get("project_id", "?"),
             goal            = goal,
-            strategy_type   = plan.get("strategy_type", "?"),
+            strategy_name   = plan.get("strategy_name", "?"),
             terminate_reason= reason,
             attempt_count   = attempt,
             attempts_table  = attempts_table,
             target_win_rate = plan.get("target_win_rate", _PASS_WIN_RATE),
+            OUTPUT_DIR      = output_dir,
         )
 
         report_md = ""
         summary   = ""
         try:
-            raw       = _call_llm(prompt)
-            report_md = (_extract_tag(raw, "CONTENT") or "").strip()
-            summary   = (_extract_tag(raw, "REASON")  or "").strip()
+            _call_llm(prompt, cwd=output_dir)
+            report_file = Path(output_dir) / "termination_report.md"
+            report_md = report_file.read_text(encoding="utf-8").strip()
+            # Extract summary from _摘要：..._ line if present
+            for line in report_md.splitlines():
+                if "摘要" in line:
+                    summary = line.strip("_").replace("摘要：", "").strip()
+                    break
             logger.info("[QuantAlpha] terminate_summarize  LLM report generated (%d chars)", len(report_md))
         except (FileNotFoundError, RuntimeError) as e:
             logger.warning("[QuantAlpha] terminate_summarize  LLM unavailable (%s) — using default", e)
+        except Exception as e:
+            logger.warning("[QuantAlpha] terminate_summarize  file read failed (%s) — using default", e)
 
         if not report_md:
             # Fall back to base-class template

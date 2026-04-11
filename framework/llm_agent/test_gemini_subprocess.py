@@ -19,7 +19,7 @@ from pathlib import Path
 VOLUME_BASE = os.getenv("VOLUME_BASE_DIR", r"E:\docker_data\agentic-research")
 SPEC_PATH   = r"E:\users\download\spec.md"
 RULES_PATH  = str((Path(__file__).parent.parent.parent / ".ai" / "rules" / "spec-review.md").resolve())
-PROMPT_FILE = str((Path(__file__).parent.parent / "prompts" / "spec_agent_primary.txt").resolve())
+PROMPT_FILE = str((Path(__file__).parent.parent / "prompts" / "spec_review" / "spec_agent_primary.txt").resolve())
 
 # ─── 工具 ────────────────────────────────────────────────────────────────────
 

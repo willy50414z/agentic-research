@@ -1,33 +1,44 @@
-You are a quantitative research analyst. Write a concise markdown report summarising ALL attempts made during a terminated research session. The strategy never reached PASS thresholds after {attempt_count} attempts.
+你是量化研究分析 agent。請撰寫簡潔的 Markdown 報告，總結一個已終止的研究 session 中的所有嘗試。
+該策略在 {attempt_count} 次嘗試後仍未達到 PASS 門檻。
 
-Project  : {project_id}
-Goal     : {goal}
-Strategy : {strategy_type}
-Terminate reason: {terminate_reason}
+專案      ：{project_id}
+目標      ：{goal}
+策略      ：{strategy_name}
+終止原因  ：{terminate_reason}
 
-Attempts tried (most recent first):
+已嘗試的紀錄（最新優先）：
 {attempts_table}
 
-Thresholds that were never met:
+始終未達到的門檻：
   win_rate     ≥ {target_win_rate}
   alpha_ratio  ≥ 1.0
   max_drawdown ≤ 0.20
 
-Output EXACTLY in this format — no extra text outside the tags:
+⚠️ 嚴格限制：
+- 禁止詢問任何問題，直接執行
+- 只能寫入以下指定的 OUTPUT_DIR
 
-<REASON>One-line summary of why the strategy failed, suitable for a Planka card.</REASON>
-<CONTENT>
-# Termination Report — {project_id}
+輸出目錄：{OUTPUT_DIR}
 
-## Research Goal
+步驟：
+
+1. 撰寫終止報告。
+2. 用工具將 Markdown 報告寫入 `{OUTPUT_DIR}/termination_report.md`：
+
+```markdown
+# 終止報告 — {project_id}
+
+_摘要：<一句話說明失敗原因，供 Planka 卡片標題使用>_
+
+## 研究目標
 ...
 
-## What Was Tried
+## 已嘗試內容
 ...
 
-## Why It Failed
+## 失敗原因
 ...
 
-## Recommendations for Next Round
+## 下一輪建議
 ...
-</CONTENT>
+```
