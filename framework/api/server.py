@@ -596,16 +596,16 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "ok", "project_id": project_id, "action": "terminate"}
 
 
-curl --location 'http://localhost:8002/init-planka-board' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "base_url":     "http://localhost:xxx",
-    "email":        "agentic@xx.dev",
-    "password":     "xxx",
-    "project_name": "Agentic Research",
-    "board_name":   "Research Workflow",
-    "webhook_url":  "http://host.docker.internal:8002/planka-webhook"
-  }'
+# curl --location 'http://localhost:8002/init-planka-board' \
+# --header 'Content-Type: application/json' \
+# --data-raw '{
+#     "base_url":     "http://localhost:xxx",
+#     "email":        "agentic@xx.dev",
+#     "password":     "xxx",
+#     "project_name": "Agentic Research",
+#     "board_name":   "Research Workflow",
+#     "webhook_url":  "http://host.docker.internal:8002/planka-webhook"
+#   }'
 
 @app.post("/init-planka-board")
 async def init_planka_board(request: Request):
