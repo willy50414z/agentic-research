@@ -1,0 +1,1192 @@
+{
+  "nodes": [
+    {
+      "id": "btc_15m_lstm_strategy",
+      "label": "BTC/USDT 15m LSTM Strategy Spec",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "btc_15m_lstm_react_framework",
+      "label": "ReAct Framework for LSTM Strategy Development",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": "Working Logic section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "btc_15m_lstm_freqtrade_dep",
+      "label": "Freqtrade Dependency for BTC LSTM Strategy",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": "Technical Constraints section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_introduction",
+      "label": "LangChain Introduction",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_framework_concept",
+      "label": "LangChain as LLM Orchestration Framework",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "What is LangChain section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_langgraph",
+      "label": "LangGraph Agent Workflow Engine",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Agent workflow section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_langsmith",
+      "label": "LangSmith Observability and Tracing",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Visualization section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_rag",
+      "label": "RAG (Retrieval-Augmented Generation) in LangChain",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "RAG section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_trust_rationale",
+      "label": "Rationale: Why LLM Variables Cannot Be Fully Trusted",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Trust variables section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_btc_strategy_role",
+      "label": "LangChain Role in BTC Strategy System",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Practical role section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_learning_plan",
+      "label": "LangChain Learning Plan",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_phase1_model_io",
+      "label": "LangChain Phase 1: Model I/O Basics",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 1",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_phase2_rag",
+      "label": "LangChain Phase 2: Data Connection / RAG",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 2",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain_phase6_ecosystem",
+      "label": "LangChain Phase 6: Advanced Ecosystem (LangGraph, LangSmith, LangServe)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 6",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_record_standard",
+      "label": "Backtest Record Standard",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_record_rationale",
+      "label": "Rationale: Why Backtest Results Must Be Recorded",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Why Record section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_record_template",
+      "label": "Backtest Report Template",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Backtest Report Template section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_experiment_template",
+      "label": "Experiment Notes Template",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Experiment Notes Template section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_records_index",
+      "label": "Backtest Records Index",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/backtest-records/index.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "quant_advanced_analysis_skill",
+      "label": "Advanced Quant Multi-Dimensional Analysis Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "quant_vision_analysis",
+      "label": "Vision-Based Pattern Analysis (CNN/ViT)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 1",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "quant_microstructure",
+      "label": "Market Microstructure: Order Flow Imbalance and Liquidation",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 2",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "quant_alt_data",
+      "label": "Alternative and On-Chain Data Analysis",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 3",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "quant_regime_optimization",
+      "label": "Market Regime Detection and Meta-Analysis",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 4",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_list",
+      "label": "Trading Strategy Research Index (24 Strategies)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "turtle_trading",
+      "label": "Turtle Trading Strategy (海龜交易法)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_01_Turtle_Trading/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Richard Dennis, William Eckhardt",
+      "contributor": null
+    },
+    {
+      "id": "turtle_trading_donchian",
+      "label": "Donchian Channel Indicator",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_01_Turtle_Trading/README.md",
+      "source_location": "Key Indicators section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "turtle_trading_atr",
+      "label": "ATR (Average True Range) for Position Sizing",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_01_Turtle_Trading/README.md",
+      "source_location": "Risk Management section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "triple_screen_strategy",
+      "label": "Triple Screen Strategy (三重濾網策略)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_02_Triple_Screen/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Alexander Elder",
+      "contributor": null
+    },
+    {
+      "id": "triple_screen_multi_tf",
+      "label": "Multi-Timeframe Synchronization Technique",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_02_Triple_Screen/README.md",
+      "source_location": "Multi_TF_Sync section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "pullback_n_pattern",
+      "label": "Pullback / N-Pattern Strategy (拉回做多策略)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_03_Pullback_N_Pattern_Strategy/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ichimoku_cloud",
+      "label": "Ichimoku Cloud Strategy (一目均衡表)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_04_Ichimoku_Cloud/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Goichi Hosoda",
+      "contributor": null
+    },
+    {
+      "id": "bollinger_band_reversion",
+      "label": "Bollinger Band Reversion Strategy (布林通道回歸)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/02_Mean_Reversion/02_01_Bollinger_Band_Reversion/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "John Bollinger",
+      "contributor": null
+    },
+    {
+      "id": "bollinger_adx_filter_rationale",
+      "label": "Rationale: ADX Filter Required to Avoid Losing in Trending Markets",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/02_Mean_Reversion/02_01_Bollinger_Band_Reversion/README.md",
+      "source_location": "Trend Filter section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "momentum_breakout",
+      "label": "Momentum Breakout Strategy (動量爆發)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_01_Momentum_Breakout/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "momentum_breakout_jegadeesh_titman",
+      "label": "Jegadeesh & Titman (1993) Momentum Effect Research",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_01_Momentum_Breakout/README.md",
+      "source_location": "Overview section",
+      "source_url": null,
+      "captured_at": null,
+      "author": "Jegadeesh, Titman",
+      "contributor": null
+    },
+    {
+      "id": "divergence_trading",
+      "label": "Divergence Trading Strategy (指標背離策略)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_02_Divergence_Trading/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Gerald Appel, J. Welles Wilder",
+      "contributor": null
+    },
+    {
+      "id": "divergence_anti_future_function",
+      "label": "Rationale: Right-Side Confirmation Required to Avoid Look-Ahead Bias in Divergence",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_02_Divergence_Trading/README.md",
+      "source_location": "Anti_Future_Function section",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "exhaustion_gap_fade",
+      "label": "Exhaustion Gap Fade Strategy (竭盡缺口回補)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_03_Exhaustion_Gap_Fade/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Robert Edwards, John Magee",
+      "contributor": null
+    },
+    {
+      "id": "gap_four_types",
+      "label": "Four Types of Price Gaps (Edward & Magee Classification)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_03_Exhaustion_Gap_Fade/README.md",
+      "source_location": "Gap types table",
+      "source_url": null,
+      "captured_at": null,
+      "author": "Robert Edwards, John Magee",
+      "contributor": null
+    },
+    {
+      "id": "vcp_pattern",
+      "label": "VCP - Volatility Contraction Pattern (波動率收縮型態)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_01_VCP_Volatility_Contraction_Pattern/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Mark Minervini",
+      "contributor": null
+    },
+    {
+      "id": "double_bottom_top",
+      "label": "Double Bottom / Top (W底 / M頭)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_02_Double_Bottom_Top/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Richard Schabacker, John Murphy, Thomas Bulkowski",
+      "contributor": null
+    },
+    {
+      "id": "head_and_shoulders",
+      "label": "Head and Shoulders Pattern (頭肩底 / 頭肩頂)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_03_Head_and_Shoulders/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "bull_bear_flag",
+      "label": "Bull / Bear Flag Pattern (多頭 / 空頭旗型)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_04_Bull_Bear_Flag/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "cup_and_handle",
+      "label": "Cup and Handle Pattern (杯柄型態)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_05_Cup_and_Handle/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "William J. O'Neil",
+      "contributor": null
+    },
+    {
+      "id": "island_reversal",
+      "label": "Island Reversal Pattern (島型反轉)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_06_Island_Reversal/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "harmonic_patterns",
+      "label": "Harmonic Patterns (諧波型態)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_07_Harmonic_Patterns/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "H.M. Gartley, Scott Carney",
+      "contributor": null
+    },
+    {
+      "id": "harmonic_prz",
+      "label": "Potential Reversal Zone (PRZ) Concept",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_07_Harmonic_Patterns/README.md",
+      "source_location": "PRZ Entry section",
+      "source_url": null,
+      "captured_at": null,
+      "author": "Scott Carney",
+      "contributor": null
+    },
+    {
+      "id": "ml_trading_strategy_skill",
+      "label": "ML Trading Strategy Development Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/ml/ml-trading-strategy/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "btc_15m_lstm_strategy",
+      "target": "btc_15m_lstm_react_framework",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": "Working Logic section",
+      "weight": 1.0
+    },
+    {
+      "source": "btc_15m_lstm_strategy",
+      "target": "btc_15m_lstm_freqtrade_dep",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": "Technical Constraints section",
+      "weight": 1.0
+    },
+    {
+      "source": "btc_15m_lstm_strategy",
+      "target": "ml_trading_strategy_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/strategy/BTC_15m_LSTM.md",
+      "source_location": "Note at top",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_framework_concept",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_langgraph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Agent workflow section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_langsmith",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Visualization section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_rag",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "RAG section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_trust_rationale",
+      "target": "langchain_framework_concept",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Trust variables section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_btc_strategy_role",
+      "target": "langchain_framework_concept",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Practical role section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_btc_strategy_role",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Practical role section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "langchain_trust_rationale",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "Trust variables section",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_learning_plan",
+      "target": "langchain_introduction",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "langchain_learning_plan",
+      "target": "langchain_phase1_model_io",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 1",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_learning_plan",
+      "target": "langchain_phase2_rag",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 2",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_learning_plan",
+      "target": "langchain_phase6_ecosystem",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 6",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_phase6_ecosystem",
+      "target": "langchain_langgraph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 6",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_phase6_ecosystem",
+      "target": "langchain_langsmith",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/langchain_learning_plan.md",
+      "source_location": "Phase 6",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_record_rationale",
+      "target": "backtest_record_standard",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Why Record section",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_record_standard",
+      "target": "backtest_record_template",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Template section",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_record_standard",
+      "target": "backtest_experiment_template",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md",
+      "source_location": "Experiment template section",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_records_index",
+      "target": "backtest_record_standard",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "knowledge-base/knowledge/backtest-records/index.md",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "quant_advanced_analysis_skill",
+      "target": "quant_vision_analysis",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 1",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_advanced_analysis_skill",
+      "target": "quant_microstructure",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 2",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_advanced_analysis_skill",
+      "target": "quant_alt_data",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 3",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_advanced_analysis_skill",
+      "target": "quant_regime_optimization",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 4",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_vision_analysis",
+      "target": "vcp_pattern",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 1 - Applicable strategies",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_vision_analysis",
+      "target": "head_and_shoulders",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 1 - Applicable strategies",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_vision_analysis",
+      "target": "cup_and_handle",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 1 - Applicable strategies",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_microstructure",
+      "target": "island_reversal",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.65,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Dimension 2 - Liquidation Insights",
+      "weight": 0.65
+    },
+    {
+      "source": "strategy_list",
+      "target": "turtle_trading",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "triple_screen_strategy",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "pullback_n_pattern",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "ichimoku_cloud",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "bollinger_band_reversion",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "momentum_breakout",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "divergence_trading",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "vcp_pattern",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "double_bottom_top",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "head_and_shoulders",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "bull_bear_flag",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "cup_and_handle",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "island_reversal",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "harmonic_patterns",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_list",
+      "target": "exhaustion_gap_fade",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "turtle_trading",
+      "target": "turtle_trading_donchian",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_01_Turtle_Trading/README.md",
+      "source_location": "Key Indicators section",
+      "weight": 1.0
+    },
+    {
+      "source": "turtle_trading",
+      "target": "turtle_trading_atr",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_01_Turtle_Trading/README.md",
+      "source_location": "Risk Management section",
+      "weight": 1.0
+    },
+    {
+      "source": "triple_screen_strategy",
+      "target": "triple_screen_multi_tf",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/01_Trend_Following/01_02_Triple_Screen/README.md",
+      "source_location": "Multi_TF_Sync section",
+      "weight": 1.0
+    },
+    {
+      "source": "momentum_breakout",
+      "target": "momentum_breakout_jegadeesh_titman",
+      "relation": "cites",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_01_Momentum_Breakout/README.md",
+      "source_location": "Overview section",
+      "weight": 1.0
+    },
+    {
+      "source": "divergence_anti_future_function",
+      "target": "divergence_trading",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_02_Divergence_Trading/README.md",
+      "source_location": "Anti_Future_Function section",
+      "weight": 1.0
+    },
+    {
+      "source": "exhaustion_gap_fade",
+      "target": "gap_four_types",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/03_Momentum_Trading/03_03_Exhaustion_Gap_Fade/README.md",
+      "source_location": "Gap types table",
+      "weight": 1.0
+    },
+    {
+      "source": "harmonic_patterns",
+      "target": "harmonic_prz",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_07_Harmonic_Patterns/README.md",
+      "source_location": "PRZ Entry section",
+      "weight": 1.0
+    },
+    {
+      "source": "bollinger_adx_filter_rationale",
+      "target": "bollinger_band_reversion",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/02_Mean_Reversion/02_01_Bollinger_Band_Reversion/README.md",
+      "source_location": "Trend Filter section",
+      "weight": 1.0
+    },
+    {
+      "source": "head_and_shoulders",
+      "target": "double_bottom_top",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_03_Head_and_Shoulders/README.md",
+      "source_location": "Optimization section - merge with W/M pattern",
+      "weight": 1.0
+    },
+    {
+      "source": "island_reversal",
+      "target": "exhaustion_gap_fade",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_06_Island_Reversal/README.md",
+      "source_location": "Optional: combine into extreme reversal family",
+      "weight": 1.0
+    },
+    {
+      "source": "cup_and_handle",
+      "target": "vcp_pattern",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/04_Pattern_Trading/04_05_Cup_and_Handle/README.md",
+      "source_location": "Extended reading section - related patterns",
+      "weight": 1.0
+    },
+    {
+      "source": "langchain_introduction",
+      "target": "btc_15m_lstm_strategy",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md",
+      "source_location": "BTC strategy example section",
+      "weight": 0.7
+    },
+    {
+      "source": "quant_regime_optimization",
+      "target": "bollinger_band_reversion",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Application matrix - Mean Reversion row",
+      "weight": 1.0
+    },
+    {
+      "source": "quant_regime_optimization",
+      "target": "turtle_trading",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md",
+      "source_location": "Application matrix - Trend Following row",
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "trend_following_family",
+      "label": "Trend Following Strategy Family",
+      "nodes": ["turtle_trading", "triple_screen_strategy", "pullback_n_pattern", "ichimoku_cloud"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md"
+    },
+    {
+      "id": "pattern_reversal_family",
+      "label": "Pattern-Based Reversal Strategy Family",
+      "nodes": ["double_bottom_top", "head_and_shoulders", "island_reversal", "exhaustion_gap_fade"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md"
+    },
+    {
+      "id": "pattern_continuation_family",
+      "label": "Pattern-Based Continuation Strategy Family",
+      "nodes": ["bull_bear_flag", "cup_and_handle", "vcp_pattern"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md"
+    },
+    {
+      "id": "momentum_trading_family",
+      "label": "Momentum Trading Strategy Family",
+      "nodes": ["momentum_breakout", "divergence_trading", "exhaustion_gap_fade"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/strategy_list.md"
+    },
+    {
+      "id": "quant_advanced_dimensions",
+      "label": "Four Dimensions of Advanced Quant Analysis",
+      "nodes": ["quant_vision_analysis", "quant_microstructure", "quant_alt_data", "quant_regime_optimization"],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/strategy_research/QUANT_ADVANCED_ANALYSIS_SKILL.md"
+    },
+    {
+      "id": "langchain_ecosystem",
+      "label": "LangChain Ecosystem Components",
+      "nodes": ["langchain_framework_concept", "langchain_langgraph", "langchain_langsmith", "langchain_rag"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/langchain/introduction.md"
+    },
+    {
+      "id": "backtest_knowledge_management",
+      "label": "Backtest Knowledge Management System",
+      "nodes": ["backtest_record_standard", "backtest_record_template", "backtest_experiment_template", "backtest_records_index"],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/backtest-records/backtest-record-standard.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

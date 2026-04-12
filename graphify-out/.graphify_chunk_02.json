@@ -1,0 +1,1419 @@
+{
+  "nodes": [
+    {
+      "id": "data_pipeline_skill",
+      "label": "Data Pipeline Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "regime_filter_validation_skill",
+      "label": "Regime Filter Validation Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/regime-filter-validation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_performance_evaluation_skill",
+      "label": "Strategy Performance Evaluation Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_data_validation_skill",
+      "label": "Trade Strategy Data Validation Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-data-validation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_hypothesis_baseline_skill",
+      "label": "Trade Strategy Hypothesis Baseline Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-hypothesis-baseline/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_improvement_planning_skill",
+      "label": "Trade Strategy Improvement Planning Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_prototype_design_skill",
+      "label": "Trade Strategy Prototype Design Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-prototype-design/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_scope_skill",
+      "label": "Trade Strategy Scope Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-scope/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "backtest_preflight_skill",
+      "label": "Backtest Preflight Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "data_readiness_check_skill",
+      "label": "Data Readiness Check Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/data-readiness-check/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "download_data_skill",
+      "label": "Freqtrade Download Data Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "freqtrade_analysis_workflow_skill",
+      "label": "Freqtrade Analysis Workflow Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "look_ahead_bias_check_skill",
+      "label": "Look-Ahead Bias Check Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/look-ahead-bias-check/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "oos_validation_gate_skill",
+      "label": "OOS Validation Gate Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "trade_strategy_freqtrade_implementation_skill",
+      "label": "Trade Strategy Freqtrade Implementation Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent_config_maintenance_skill",
+      "label": "Agent Config Maintenance Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/agent-config/agent-config-maintenance/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "documentation_workflow_skill",
+      "label": "Documentation Workflow Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/docs/documentation-workflow/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "markdown_review_skill",
+      "label": "Markdown Review Skill",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/docs/markdown-review/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent_commands_doc",
+      "label": "AI Agent Common Commands Reference",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/AGENT_COMMANDS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implement_trade_strategy_steps_doc",
+      "label": "Trade Strategy Implementation Steps Master Workflow",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "multi_agent_harness_doc",
+      "label": "Multi-Agent Harness Quantitative Strategy Research Protocol",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "common_prompts_doc",
+      "label": "Common Prompts for Quantitative Strategy Development",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/常用提示詞.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "binance_service",
+      "label": "BinanceService",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "lib/client/crypto_exchange/binance_svc.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "feature_store",
+      "label": "FeatureStore",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "lib/storage/feature_store.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "check_data_readiness_endpoint",
+      "label": "check_data_readiness CLI Endpoint",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/data-readiness-check/SKILL.md",
+      "source_location": "lib/endpoints/check_data_readiness.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "freqtrade_endpoint",
+      "label": "Freqtrade CLI Endpoint",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": "lib/endpoints/freqtrade.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "freqtrade_executor",
+      "label": "Freqtrade Execution Adapter",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": "lib/strategy/execution/freqtrade_executor.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "analyze_backtest_result_script",
+      "label": "Analyze Backtest Result Script",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "lib/strategy/analytics/analyze_backtest_result.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "generate_freqtrade_config_endpoint",
+      "label": "Generate Freqtrade Config Endpoint",
+      "file_type": "code",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "lib/endpoints/generate_freqtrade_config.py",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_feature_cache",
+      "label": "Feature Cache (FeatureStore Pattern)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_look_ahead_bias",
+      "label": "Look-Ahead Bias (Leakage Prevention Concept)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-data-validation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_oos_validation",
+      "label": "Out-of-Sample (OOS) Validation",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_regime_filter",
+      "label": "Regime Filter (Market Condition Filter)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/regime-filter-validation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_strategy_profile",
+      "label": "Strategy Profile (A/B/C Classification)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_launch_gate",
+      "label": "Launch Gate (Strategy Deployment Decision Framework)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_dbg_columns",
+      "label": "dbg_ Debug Columns (Signal Auditability Pattern)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_hypothesis_log",
+      "label": "Hypothesis Log (Prior Art Tracking)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_status_md",
+      "label": "STATUS.md (Strategy Phase Tracker)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_analysis_summary",
+      "label": "Analysis Summary (Session Artifact)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_sdd",
+      "label": "Spec-Driven Development (SDD)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_multi_agent_collaboration",
+      "label": "Multi-Agent Collaboration Architecture",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_self_improvement",
+      "label": "Self-Improvement Mechanism (Harness Knowledge Feedback)",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_profit_factor",
+      "label": "Profit Factor (Core Trading Metric)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_is_oos_degradation",
+      "label": "IS/OOS Degradation Ratio",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "concept_claude_config_files",
+      "label": "Agent Configuration Files (.claude/CLAUDE.md, opencode.json, etc.)",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/agent-config/agent-config-maintenance/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_no_direct_raw_json_to_llm",
+      "label": "Rationale: Parser First - Do Not Send Raw JSON to LLM",
+      "file_type": "document",
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_hard_oos_gate",
+      "label": "Rationale: Hard OOS Gate Prevents Silent Overfitting",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_profile_based_eval",
+      "label": "Rationale: Profile-Based Evaluation Avoids Universal Threshold Errors",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_deterministic_bias_check",
+      "label": "Rationale: Use Deterministic Code Scan (Not LLM) for Look-Ahead Bias",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/look-ahead-bias-check/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_one_change_per_iteration",
+      "label": "Rationale: One Focused Change Per Iteration for Clear Attribution",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rationale_data_pipeline_vs_download_data",
+      "label": "Rationale: data-pipeline Skill is for FeatureStore, Not Freqtrade Backtest Data",
+      "file_type": "document",
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "data_pipeline_skill",
+      "target": "binance_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Code Reference table",
+      "weight": 1.0
+    },
+    {
+      "source": "data_pipeline_skill",
+      "target": "feature_store",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Code Reference table",
+      "weight": 1.0
+    },
+    {
+      "source": "data_pipeline_skill",
+      "target": "concept_feature_cache",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Feature Cache Layout section",
+      "weight": 1.0
+    },
+    {
+      "source": "data_pipeline_skill",
+      "target": "trade_strategy_data_validation_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Code Reference table - Data validation rules",
+      "weight": 1.0
+    },
+    {
+      "source": "data_pipeline_skill",
+      "target": "download_data_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Scope note - use download-data skill for Freqtrade backtest data",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_data_pipeline_vs_download_data",
+      "target": "data_pipeline_skill",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": "Scope section",
+      "weight": 1.0
+    },
+    {
+      "source": "regime_filter_validation_skill",
+      "target": "concept_regime_filter",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/regime-filter-validation/SKILL.md",
+      "source_location": "Workflow section",
+      "weight": 1.0
+    },
+    {
+      "source": "regime_filter_validation_skill",
+      "target": "concept_analysis_summary",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/regime-filter-validation/SKILL.md",
+      "source_location": "Step 6 - Record findings",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "concept_strategy_profile",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 2 - Strategy Profiles",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "concept_launch_gate",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 1 - Launch Gate Workflow",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "concept_is_oos_degradation",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 4 - IS/OOS Degradation Grading",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "concept_profit_factor",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 6 - Eight Core Metrics",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "oos_validation_gate_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 12 - Integration with Other Skills",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 12 - Integration with Other Skills",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "freqtrade_analysis_workflow_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 12 - Integration with Other Skills",
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_performance_evaluation_skill",
+      "target": "trade_strategy_improvement_planning_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 12 - Integration with Other Skills",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_profile_based_eval",
+      "target": "strategy_performance_evaluation_skill",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/strategy-performance-evaluation/SKILL.md",
+      "source_location": "Section 1 intro",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_data_validation_skill",
+      "target": "concept_look_ahead_bias",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-data-validation/SKILL.md",
+      "source_location": "Core Standards - Leakage Prevention",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_data_validation_skill",
+      "target": "concept_oos_validation",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-data-validation/SKILL.md",
+      "source_location": "Required Work - Split Strategy",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_hypothesis_baseline_skill",
+      "target": "trade_strategy_scope_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-hypothesis-baseline/SKILL.md",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "trade_strategy_improvement_planning_skill",
+      "target": "concept_hypothesis_log",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": "Step 3 - Check prior art",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_improvement_planning_skill",
+      "target": "concept_status_md",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": "Quick Reference - Step 1",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_improvement_planning_skill",
+      "target": "concept_analysis_summary",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": "MANDATORY PREREQUISITES",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_one_change_per_iteration",
+      "target": "trade_strategy_improvement_planning_skill",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-improvement-planning/SKILL.md",
+      "source_location": "General Decision Rules",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_prototype_design_skill",
+      "target": "concept_regime_filter",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-prototype-design/SKILL.md",
+      "source_location": "Required Work - Define Regime Filters",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_prototype_design_skill",
+      "target": "trade_strategy_freqtrade_implementation_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/trade-strategy-prototype-design/SKILL.md",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "backtest_preflight_skill",
+      "target": "data_readiness_check_skill",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "Gate 1 - Data Readiness",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_preflight_skill",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "Gate 2 - Look-Ahead Bias Check",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_preflight_skill",
+      "target": "generate_freqtrade_config_endpoint",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "Gate 3 - Config Completeness",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_preflight_skill",
+      "target": "check_data_readiness_endpoint",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "backtest_preflight_skill",
+      "target": "freqtrade_analysis_workflow_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md",
+      "source_location": "Preflight Completion Checklist - proceed to freqtrade-analysis-workflow",
+      "weight": 1.0
+    },
+    {
+      "source": "data_readiness_check_skill",
+      "target": "download_data_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/data-readiness-check/SKILL.md",
+      "source_location": "Step 4 - On MISSING or TRUNCATED",
+      "weight": 1.0
+    },
+    {
+      "source": "data_readiness_check_skill",
+      "target": "check_data_readiness_endpoint",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/data-readiness-check/SKILL.md",
+      "source_location": "Quick Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "download_data_skill",
+      "target": "freqtrade_endpoint",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": "Quick Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "download_data_skill",
+      "target": "freqtrade_executor",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "download_data_skill",
+      "target": "data_readiness_check_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/download-data/SKILL.md",
+      "source_location": "When to Use - Step 1",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "backtest_preflight_skill",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 1 - Run Backtest - Before running",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 2 - Validate Results",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "oos_validation_gate_skill",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 2 - Validate Results",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "analyze_backtest_result_script",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 3 - Analyze Performance",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "freqtrade_endpoint",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "freqtrade_executor",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "concept_analysis_summary",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 3 - Analyze Performance - required output",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "concept_status_md",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 1 - After running",
+      "weight": 1.0
+    },
+    {
+      "source": "freqtrade_analysis_workflow_skill",
+      "target": "regime_filter_validation_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md",
+      "source_location": "Phase 3 - REGIME_ANALYSIS section",
+      "weight": 0.75
+    },
+    {
+      "source": "look_ahead_bias_check_skill",
+      "target": "concept_look_ahead_bias",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/look-ahead-bias-check/SKILL.md",
+      "source_location": "Full skill content",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_deterministic_bias_check",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/look-ahead-bias-check/SKILL.md",
+      "source_location": "Intro paragraph",
+      "weight": 1.0
+    },
+    {
+      "source": "oos_validation_gate_skill",
+      "target": "concept_oos_validation",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": "Full skill content",
+      "weight": 1.0
+    },
+    {
+      "source": "oos_validation_gate_skill",
+      "target": "concept_is_oos_degradation",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": "Step 3 - Apply gate rules",
+      "weight": 1.0
+    },
+    {
+      "source": "oos_validation_gate_skill",
+      "target": "concept_status_md",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": "Step 4 - Record verdict in STATUS.md",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_hard_oos_gate",
+      "target": "oos_validation_gate_skill",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/oos-validation-gate/SKILL.md",
+      "source_location": "Why This Gate Matters section",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "concept_dbg_columns",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Required Work and Quick Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Quick Reference - Common look-ahead bias traps",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "freqtrade_endpoint",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "freqtrade_executor",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Code Reference",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "generate_freqtrade_config_endpoint",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Quick Reference - Config generation",
+      "weight": 1.0
+    },
+    {
+      "source": "trade_strategy_freqtrade_implementation_skill",
+      "target": "concept_status_md",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Implementation Completion Checklist",
+      "weight": 1.0
+    },
+    {
+      "source": "agent_config_maintenance_skill",
+      "target": "concept_claude_config_files",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/agent-config/agent-config-maintenance/SKILL.md",
+      "source_location": "agent_config/ structure table",
+      "weight": 1.0
+    },
+    {
+      "source": "documentation_workflow_skill",
+      "target": "markdown_review_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "knowledge-base/agent_cli_file/skills/general-skills/docs/documentation-workflow/SKILL.md",
+      "source_location": null,
+      "weight": 0.7
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_scope_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 1 - Define Research Project and Trading Goals",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_data_validation_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 2 - Historical Data Collection",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_hypothesis_baseline_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 3 - Propose Strategy Hypothesis and Baseline",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_prototype_design_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 4 - Design Entry/Exit and Risk Prototype",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_freqtrade_implementation_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 5 - Freqtrade Code Implementation",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 6 - Backtest and OOS Validation",
+      "weight": 1.0
+    },
+    {
+      "source": "implement_trade_strategy_steps_doc",
+      "target": "trade_strategy_improvement_planning_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md",
+      "source_location": "Step 9 - Improvement Planning",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "concept_sdd",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 1 - Total Goal",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "concept_multi_agent_collaboration",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 2 - Core Team Architecture",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "concept_self_improvement",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 4 - Self-Improvement Mechanisms",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "backtest_preflight_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 5 - Phase 5 - Layer 1 Audit table",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "look_ahead_bias_check_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 5 - Phase 5 - Layer 1 Audit table",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "oos_validation_gate_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 5 - Phase 5 - Layer 1 Audit table",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "trade_strategy_improvement_planning_skill",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 6 - Failure Path",
+      "weight": 1.0
+    },
+    {
+      "source": "rationale_no_direct_raw_json_to_llm",
+      "target": "multi_agent_harness_doc",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": "Section 5 - Deterministic Parser principle",
+      "weight": 1.0
+    },
+    {
+      "source": "multi_agent_harness_doc",
+      "target": "implement_trade_strategy_steps_doc",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "common_prompts_doc",
+      "target": "implement_trade_strategy_steps_doc",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/常用提示詞.md",
+      "source_location": null,
+      "weight": 0.7
+    },
+    {
+      "source": "data_pipeline_skill",
+      "target": "trade_strategy_data_validation_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/data-pipeline/SKILL.md",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "regime_filter_validation_skill",
+      "target": "strategy_performance_evaluation_skill",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "knowledge-base/agent_cli_file/skills/domain-skills/trading/regime-filter-validation/SKILL.md",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "concept_dbg_columns",
+      "target": "analyze_backtest_result_script",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md",
+      "source_location": "Required Work - dbg_ columns to support analyze_backtest_result.py",
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "trading_strategy_research_pipeline",
+      "label": "Trading Strategy Research Pipeline (Scope → Data → Hypothesis → Design → Implement → Backtest → Evaluate)",
+      "nodes": [
+        "trade_strategy_scope_skill",
+        "trade_strategy_data_validation_skill",
+        "trade_strategy_hypothesis_baseline_skill",
+        "trade_strategy_prototype_design_skill",
+        "trade_strategy_freqtrade_implementation_skill",
+        "freqtrade_analysis_workflow_skill",
+        "strategy_performance_evaluation_skill"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/implement_trade_strategy_steps.md"
+    },
+    {
+      "id": "backtest_preflight_gates",
+      "label": "Backtest Preflight Gates (Data Readiness → Look-Ahead Bias → Config Completeness)",
+      "nodes": [
+        "backtest_preflight_skill",
+        "data_readiness_check_skill",
+        "look_ahead_bias_check_skill",
+        "generate_freqtrade_config_endpoint"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/backtest-preflight/SKILL.md"
+    },
+    {
+      "id": "multi_agent_harness_layer1_audit",
+      "label": "Multi-Agent Harness Layer 1 Mandatory Audit (look-ahead bias + preflight + OOS gate)",
+      "nodes": [
+        "look_ahead_bias_check_skill",
+        "backtest_preflight_skill",
+        "oos_validation_gate_skill"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "knowledge-base/knowledge/ai/auto_develop_and_improve/multi-agent-harness-quantative-strategy-research.md"
+    },
+    {
+      "id": "post_backtest_validation_chain",
+      "label": "Post-Backtest Validation Chain (OOS Gate → Analysis → Improvement Planning)",
+      "nodes": [
+        "oos_validation_gate_skill",
+        "freqtrade_analysis_workflow_skill",
+        "strategy_performance_evaluation_skill",
+        "trade_strategy_improvement_planning_skill"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "knowledge-base/agent_cli_file/skills/framework-skills/freqtrade/freqtrade-analysis-workflow/SKILL.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

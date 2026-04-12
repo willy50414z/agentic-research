@@ -1,0 +1,1446 @@
+{
+  "nodes": [
+    {
+      "id": "readme_agentic_research_framework",
+      "label": "Agentic Research Workflow Engine",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": "willy50414z"
+    },
+    {
+      "id": "readme_langgraph",
+      "label": "LangGraph",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_planka_kanban",
+      "label": "Planka Kanban Board",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_postgresql",
+      "label": "PostgreSQL State Persistence",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_research_plugin",
+      "label": "ResearchPlugin (Plugin ABC)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_spec_review_phase",
+      "label": "Spec Review Phase (Phase 1)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_research_loop_phase",
+      "label": "Research Loop Phase (Phase 2)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_hitl_loop_review",
+      "label": "HITL Loop Review (Human-in-the-Loop)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_fastapi_server",
+      "label": "FastAPI Server (framework/api/server.py)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_plugin_registry",
+      "label": "Plugin Registry (discover_plugins)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_mlflow",
+      "label": "MLflow Experiment Tracking",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_planka_state_machine",
+      "label": "Planka State Machine (Planning→Spec Pending Review→Verify→Review→Done/Failed)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_quant_alpha_plugin",
+      "label": "QuantAlphaPlugin",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_dummy_plugin",
+      "label": "DummyPlugin (test deterministic FAIL→PASS)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_sample_plugin",
+      "label": "SamplePlugin (hyperparameter search with MLflow)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_minio",
+      "label": "MinIO Artifact Storage",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_spec_clarifier",
+      "label": "SpecClarifier (spec.md → LLM review → spec.clarified.md)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_notify_planka_node",
+      "label": "notify_planka_node (loop_review interrupt)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_agentic_research_cli",
+      "label": "agentic-research CLI (Typer app)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_research_state",
+      "label": "ResearchState TypedDict",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_planka_webhook",
+      "label": "Planka Webhook Endpoint (/planka-webhook)",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_dual_llm_spec_review",
+      "label": "Dual LLM Spec Review",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_spec_review_graph",
+      "label": "Spec Review Graph (framework/spec_review_graph.py)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_research_graph",
+      "label": "Research Graph (framework/graph.py)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_docker_compose",
+      "label": "Docker Compose Stack (deploy/docker-compose.local.yml)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_db_schema",
+      "label": "Business DB Schema (projects, loop_metrics, checkpoint_decisions)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_planka_sink",
+      "label": "PlankaSink (framework/planka.py)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "maintainer_minio_client",
+      "label": "MinIO Client (framework/minio_client.py)",
+      "file_type": "document",
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agents_output_path_rule",
+      "label": "Output Path Rule (absolute path override)",
+      "file_type": "document",
+      "source_file": "AGENTS.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_summary_btc_momentum",
+      "label": "BtcMomentumPullback Strategy Loop 0 Report",
+      "file_type": "document",
+      "source_file": "artifacts/loop_summary.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_summary_strategy_results",
+      "label": "BtcMomentumPullback Backtest Metrics (win_rate=0.7477, profit_factor=3.16)",
+      "file_type": "document",
+      "source_file": "artifacts/loop_summary.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "analyze_result_pass",
+      "label": "analyze_result.txt PASS Output",
+      "file_type": "document",
+      "source_file": "artifacts/analyze_result.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "sop_file_based_output_protocol",
+      "label": "File-Based Output Protocol (LLM writes files, framework reads)",
+      "file_type": "document",
+      "source_file": "docs/AGENTIC_RESEARCH_SOP_ZH.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "sop_spec_review_pass_need_update",
+      "label": "Spec Review Status: PASS / NEED_UPDATE",
+      "file_type": "document",
+      "source_file": "docs/AGENTIC_RESEARCH_SOP_ZH.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent_context_research_state_schema",
+      "label": "ResearchState Full Schema",
+      "file_type": "document",
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent_context_plan_review_interrupt",
+      "label": "Plan Review HITL Interrupt",
+      "file_type": "document",
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent_context_routing_signal_contract",
+      "label": "Routing Signal Contract (PASS/FAIL/TERMINATE)",
+      "file_type": "document",
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langgraph_workflow_spec_review_graph",
+      "label": "Spec Review Graph Workflow (INIT→ROUND→FINALIZE)",
+      "file_type": "document",
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langgraph_workflow_postgres_saver",
+      "label": "PostgresSaver (LangGraph checkpoint persistence)",
+      "file_type": "document",
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langgraph_workflow_plugin_integration",
+      "label": "Plugin Integration Pattern (plan/implement/test/analyze nodes)",
+      "file_type": "document",
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "plugin_spec_node_contract",
+      "label": "Plugin Node Contract (6 abstract methods)",
+      "file_type": "document",
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "plugin_spec_mlflow_integration",
+      "label": "MLflow Integration Pattern (optional, try_mlflow_log)",
+      "file_type": "document",
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "plugin_spec_llm_targets",
+      "label": "LLM Targets (CLAUDE, GEMINI, CODEX via subprocess)",
+      "file_type": "document",
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "plugin_spec_state_ownership",
+      "label": "State Ownership Reference Table",
+      "file_type": "document",
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "workflow_design_spec_md_format",
+      "label": "spec.md Format (Markdown research spec template)",
+      "file_type": "document",
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "workflow_design_llm_priority",
+      "label": "LLM Priority Order (claude→codex→gemini→opencode)",
+      "file_type": "document",
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "workflow_design_resume_endpoint",
+      "label": "/resume Endpoint Logic (checkpoint→graph.invoke Command)",
+      "file_type": "document",
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "workflow_design_spec_clarified_md",
+      "label": "spec.clarified.md (Q&A Markdown for spec refinement)",
+      "file_type": "document",
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_knowledge_three_layer",
+      "label": "Three-Layer Strategy Knowledge Architecture",
+      "file_type": "document",
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_knowledge_factor_library",
+      "label": "Factor Library (IC-scored trading factors)",
+      "file_type": "document",
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_knowledge_pain_point_routing",
+      "label": "Pain Point Routing Table (pain-point-routing.md)",
+      "file_type": "document",
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_knowledge_ic_scoring",
+      "label": "IC (Information Coefficient) Factor Scoring",
+      "file_type": "document",
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "strategy_knowledge_no_rag_rationale",
+      "label": "Rationale: No RAG Needed (<100 strategies, structured grep preferred)",
+      "file_type": "document",
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "analyze_prompt_quant_alpha",
+      "label": "Analyze Prompt (quant_alpha) — 4-metric PASS/FAIL/TERMINATE",
+      "file_type": "document",
+      "source_file": "framework/prompts/quant_alpha/analyze.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "final_summary_prompt_quant_alpha",
+      "label": "Final Summary Prompt (quant_alpha) — multi-loop research report",
+      "file_type": "document",
+      "source_file": "framework/prompts/quant_alpha/final_summary.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "codex_advise_file_based_protocol_strength",
+      "label": "Rationale: File-Based Protocol as Engineering Value (traceable, debuggable, reproducible)",
+      "file_type": "document",
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "codex_advise_dual_llm_resilience_gap",
+      "label": "Design Gap: Dual LLM Resilience (single provider failure halts spec review)",
+      "file_type": "document",
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "codex_advise_status_vocab_inconsistency",
+      "label": "Design Issue: Status Vocabulary Inconsistency (PASS/FAIL vs PASS/NEED_UPDATE)",
+      "file_type": "document",
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "dev_checklist_phase_overview",
+      "label": "Dev Verification Checklist (P0-P4 + Freqtrade TODO)",
+      "file_type": "document",
+      "source_file": "docs/DEV_CHECKLIST.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "dev_checklist_freqtrade_integration",
+      "label": "TODO: Freqtrade Real Backtest Integration (stub in backtest.py)",
+      "file_type": "document",
+      "source_file": "docs/DEV_CHECKLIST.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "todo_freqtrade_backtest",
+      "label": "TODO: Real Freqtrade Backtest (run_backtest is stub)",
+      "file_type": "document",
+      "source_file": "docs/TODO.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "todo_llm_api_module",
+      "label": "TODO: LLM Independent Module via API",
+      "file_type": "document",
+      "source_file": "docs/TODO.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "user_guide_spec_fields",
+      "label": "Spec Required Fields (Plugin, Performance Thresholds, Universe)",
+      "file_type": "document",
+      "source_file": "docs/USER_GUIDE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_core_deps",
+      "label": "Core Dependencies (langgraph, fastapi, psycopg, anthropic, openai, mlflow)",
+      "file_type": "document",
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "readme_agentic_research_framework",
+      "target": "readme_langgraph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_agentic_research_framework",
+      "target": "readme_planka_kanban",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_agentic_research_framework",
+      "target": "readme_postgresql",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_agentic_research_framework",
+      "target": "readme_spec_review_phase",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_agentic_research_framework",
+      "target": "readme_research_loop_phase",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_research_loop_phase",
+      "target": "readme_hitl_loop_review",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_fastapi_server",
+      "target": "readme_planka_webhook",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_research_plugin",
+      "target": "readme_quant_alpha_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_research_plugin",
+      "target": "readme_dummy_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_research_plugin",
+      "target": "readme_sample_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_plugin_registry",
+      "target": "readme_research_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_planka_state_machine",
+      "target": "readme_planka_kanban",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_notify_planka_node",
+      "target": "readme_hitl_loop_review",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_spec_clarifier",
+      "target": "readme_spec_review_phase",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_sample_plugin",
+      "target": "readme_mlflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_spec_review_graph",
+      "target": "maintainer_dual_llm_spec_review",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_research_graph",
+      "target": "readme_research_loop_phase",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_docker_compose",
+      "target": "readme_postgresql",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_docker_compose",
+      "target": "readme_mlflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_docker_compose",
+      "target": "readme_planka_kanban",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_docker_compose",
+      "target": "readme_minio",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "maintainer_db_schema",
+      "target": "readme_postgresql",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_planka_webhook",
+      "target": "maintainer_spec_review_graph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_summary_btc_momentum",
+      "target": "loop_summary_strategy_results",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "artifacts/loop_summary.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_summary_btc_momentum",
+      "target": "readme_quant_alpha_plugin",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "artifacts/loop_summary.md",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "analyze_result_pass",
+      "target": "analyze_prompt_quant_alpha",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "artifacts/analyze_result.txt",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "analyze_result_pass",
+      "target": "loop_summary_strategy_results",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "artifacts/analyze_result.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "sop_file_based_output_protocol",
+      "target": "readme_agentic_research_framework",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/AGENTIC_RESEARCH_SOP_ZH.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "sop_spec_review_pass_need_update",
+      "target": "readme_spec_review_phase",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/AGENTIC_RESEARCH_SOP_ZH.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "agent_context_research_state_schema",
+      "target": "readme_research_state",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "agent_context_plan_review_interrupt",
+      "target": "readme_hitl_loop_review",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "agent_context_routing_signal_contract",
+      "target": "readme_research_loop_phase",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/AGENT_CONTEXT.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langgraph_workflow_spec_review_graph",
+      "target": "maintainer_spec_review_graph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langgraph_workflow_postgres_saver",
+      "target": "readme_postgresql",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langgraph_workflow_plugin_integration",
+      "target": "readme_research_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/LANGGRAPH_WORKFLOW.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "plugin_spec_node_contract",
+      "target": "readme_research_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "plugin_spec_state_ownership",
+      "target": "agent_context_research_state_schema",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "weight": 0.9
+    },
+    {
+      "source": "plugin_spec_mlflow_integration",
+      "target": "readme_mlflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "plugin_spec_llm_targets",
+      "target": "workflow_design_llm_priority",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "docs/PLUGIN_SPEC.md",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "workflow_design_spec_clarified_md",
+      "target": "readme_spec_clarifier",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "workflow_design_resume_endpoint",
+      "target": "readme_fastapi_server",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "workflow_design_spec_md_format",
+      "target": "user_guide_spec_fields",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "docs/RESEARCH_WORKFLOW_DESIGN.md",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "strategy_knowledge_three_layer",
+      "target": "strategy_knowledge_factor_library",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_knowledge_three_layer",
+      "target": "strategy_knowledge_pain_point_routing",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_knowledge_factor_library",
+      "target": "strategy_knowledge_ic_scoring",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_knowledge_pain_point_routing",
+      "target": "strategy_knowledge_factor_library",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "strategy_knowledge_no_rag_rationale",
+      "target": "strategy_knowledge_three_layer",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "analyze_prompt_quant_alpha",
+      "target": "readme_quant_alpha_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "framework/prompts/quant_alpha/analyze.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "final_summary_prompt_quant_alpha",
+      "target": "readme_quant_alpha_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "framework/prompts/quant_alpha/final_summary.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "analyze_prompt_quant_alpha",
+      "target": "agent_context_routing_signal_contract",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "framework/prompts/quant_alpha/analyze.txt",
+      "source_location": null,
+      "weight": 0.9
+    },
+    {
+      "source": "codex_advise_file_based_protocol_strength",
+      "target": "sop_file_based_output_protocol",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "codex_advise_dual_llm_resilience_gap",
+      "target": "maintainer_dual_llm_spec_review",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "codex_advise_status_vocab_inconsistency",
+      "target": "sop_spec_review_pass_need_update",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/codex_advise.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "dev_checklist_phase_overview",
+      "target": "readme_agentic_research_framework",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/DEV_CHECKLIST.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "dev_checklist_freqtrade_integration",
+      "target": "todo_freqtrade_backtest",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/DEV_CHECKLIST.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "todo_freqtrade_backtest",
+      "target": "readme_quant_alpha_plugin",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/TODO.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_core_deps",
+      "target": "readme_langgraph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_core_deps",
+      "target": "readme_postgresql",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_core_deps",
+      "target": "readme_mlflow",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_core_deps",
+      "target": "readme_fastapi_server",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_core_deps",
+      "target": "readme_minio",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "user_guide_spec_fields",
+      "target": "readme_spec_review_phase",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/USER_GUIDE.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "user_guide_spec_fields",
+      "target": "readme_planka_state_machine",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/USER_GUIDE.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "sop_file_based_output_protocol",
+      "target": "analyze_prompt_quant_alpha",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "docs/AGENTIC_RESEARCH_SOP_ZH.md",
+      "source_location": null,
+      "weight": 0.8
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "research_loop_cycle",
+      "label": "Research Loop Cycle (plan→implement→test→analyze→revise/summarize)",
+      "nodes": [
+        "readme_research_loop_phase",
+        "maintainer_research_graph",
+        "langgraph_workflow_plugin_integration",
+        "agent_context_routing_signal_contract",
+        "plugin_spec_node_contract"
+      ],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "README.md"
+    },
+    {
+      "id": "spec_review_pipeline",
+      "label": "Spec Review Pipeline (spec.md→LLM review→PASS/NEED_UPDATE→Planka state)",
+      "nodes": [
+        "readme_spec_review_phase",
+        "maintainer_spec_review_graph",
+        "maintainer_dual_llm_spec_review",
+        "sop_spec_review_pass_need_update",
+        "workflow_design_spec_clarified_md",
+        "readme_spec_clarifier"
+      ],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md"
+    },
+    {
+      "id": "hitl_decision_flow",
+      "label": "HITL Decision Flow (Planka webhook→/resume→LangGraph Command)",
+      "nodes": [
+        "readme_hitl_loop_review",
+        "readme_planka_webhook",
+        "readme_fastapi_server",
+        "readme_notify_planka_node",
+        "workflow_design_resume_endpoint"
+      ],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md"
+    },
+    {
+      "id": "infrastructure_stack",
+      "label": "Infrastructure Stack (PostgreSQL+MLflow+Planka+MinIO+FastAPI)",
+      "nodes": [
+        "readme_postgresql",
+        "readme_mlflow",
+        "readme_planka_kanban",
+        "readme_minio",
+        "readme_fastapi_server",
+        "maintainer_docker_compose"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "MAINTAINER.md"
+    },
+    {
+      "id": "strategy_knowledge_system",
+      "label": "Strategy Knowledge System (factor library + pain-point routing + 3-layer architecture)",
+      "nodes": [
+        "strategy_knowledge_three_layer",
+        "strategy_knowledge_factor_library",
+        "strategy_knowledge_pain_point_routing",
+        "strategy_knowledge_ic_scoring",
+        "strategy_knowledge_no_rag_rationale"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "docs/STRATEGY_KNOWLEDGE_DESIGN.md"
+    },
+    {
+      "id": "quant_alpha_plugin_system",
+      "label": "QuantAlpha Plugin System (analyze prompt + final summary prompt + backtest stub)",
+      "nodes": [
+        "readme_quant_alpha_plugin",
+        "analyze_prompt_quant_alpha",
+        "final_summary_prompt_quant_alpha",
+        "todo_freqtrade_backtest",
+        "loop_summary_btc_momentum"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "README.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}
