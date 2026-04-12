@@ -596,6 +596,224 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "ok", "project_id": project_id, "action": "terminate"}
 
 
+curl --location 'http://localhost:8002/init-planka-board' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "base_url":     "http://localhost:xxx",
+    "email":        "agentic@xx.dev",
+    "password":     "xxx",
+    "project_name": "Agentic Research",
+    "board_name":   "Research Workflow",
+    "webhook_url":  "http://host.docker.internal:8002/planka-webhook"
+  }'
+
+@app.post("/init-planka-board")
+async def init_planka_board(request: Request):
+    """
+    Initialise a Planka project + board + lists + custom fields + webhook in one call.
+
+    Request body (JSON):
+      base_url      — Planka API base URL, e.g. "http://localhost:7002"
+      email         — admin e-mail
+      password      — admin password
+      project_name  — Planka project name (default: "Agentic Research")
+      board_name    — board name (default: "Research Workflow")
+      webhook_url   — URL Planka should POST card events to
+                      (default: "http://agentic-framework-api:8000/planka-webhook")
+
+    Returns:
+      token, board_id, and a log message instructing the caller to persist them.
+
+    File writes are intentionally omitted — the response body and server logs carry
+    the values that must be set in .env:
+      PLANKA_TOKEN=<token>
+      PLANKA_BOARD_ID=<board_id>
+    """
+    body = await request.json()
+
+    base_url     = (body.get("base_url") or "http://localhost:7002").rstrip("/")
+    email        = body.get("email") or "agentic@local.dev"
+    password     = body.get("password") or ""
+    project_name = body.get("project_name") or "Agentic Research"
+    board_name   = body.get("board_name") or "Research Workflow"
+    webhook_url  = body.get("webhook_url") or "http://agentic-framework-api:8000/planka-webhook"
+
+    headers: dict[str, str] = {}
+    log: list[str] = []
+
+    # ── 1. Login ──────────────────────────────────────────────────────────────
+    logger.info("[init-planka] step 1/6 — login  url=%r  email=%r", base_url, email)
+    resp = httpx.post(
+        f"{base_url}/api/access-tokens",
+        json={"emailOrUsername": email, "password": password},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    token = resp.json()["item"]
+    headers = {"Authorization": f"Bearer {token}"}
+    log.append("✓ Logged in")
+    logger.info("[init-planka] login OK")
+
+    # ── 2. Resolve personal project ───────────────────────────────────────────
+    # Personal projects are auto-created by Planka when the user is created;
+    # they cannot be created via the API. We fetch the list and pick the first
+    # personal project. If none exists we fall back to creating a shared one.
+    logger.info("[init-planka] step 2/6 — resolve personal project")
+    resp = httpx.get(f"{base_url}/api/projects", headers=headers, timeout=10)
+    resp.raise_for_status()
+    projects = resp.json().get("items", [])
+    logger.info(
+        "[init-planka] projects found: %s",
+        [{"id": p.get("id"), "name": p.get("name"), "type": p.get("type")} for p in projects],
+    )
+    # Personal projects have type=None; shared/team projects have type="shared".
+    # We prefer a project with type=None (personal). If none exists, create one
+    # by omitting the type field entirely — Planka defaults to personal ownership.
+    personal = next((p for p in projects if p.get("type") in ("private", None)), None)
+    if personal:
+        project_id = personal["id"]
+        log.append(f"✓ Using existing personal project '{personal.get('name')}'  (id: {project_id})")
+        logger.info("[init-planka] using personal project  id=%s", project_id)
+    else:
+        logger.info("[init-planka] no personal project found — creating one  name=%r", project_name)
+        r = httpx.post(
+            f"{base_url}/api/projects",
+            headers=headers,
+            json={"name": project_name, "type": "private"},
+            timeout=10,
+        )
+        logger.info(
+            "[init-planka] create project response  status=%s body=%s",
+            r.status_code, r.text[:500],
+        )
+        r.raise_for_status()
+        project_id = r.json()["item"]["id"]
+        log.append(f"✓ Project '{project_name}' created  (id: {project_id})")
+        logger.info("[init-planka] personal project created  id=%s", project_id)
+
+    # ── 3. Create board ───────────────────────────────────────────────────────
+    logger.info("[init-planka] step 3/6 — create board  name=%r", board_name)
+    resp = httpx.post(
+        f"{base_url}/api/projects/{project_id}/boards",
+        headers=headers,
+        json={"name": board_name, "position": 1},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    board_id = resp.json()["item"]["id"]
+    log.append(f"✓ Board '{board_name}' created  (id: {board_id})")
+    logger.info("[init-planka] board created  id=%s", board_id)
+
+    # ── 4. Create lists (columns) ─────────────────────────────────────────────
+    logger.info("[init-planka] step 4/6 — create lists")
+    _LISTS = [
+        (_COL_PLANNING,     10000),
+        (_COL_SPEC_PENDING, 20000),
+        (_COL_VERIFY,       25000),
+        (_COL_REVIEW,       30000),
+        (_COL_DONE,         40000),
+        (_COL_FAILED,       50000),
+    ]
+    resp = httpx.get(f"{base_url}/api/boards/{board_id}", headers=headers, timeout=10)
+    resp.raise_for_status()
+    existing_lists = {
+        lst["name"]
+        for lst in (resp.json().get("included", {}).get("lists") or [])
+    }
+    for name, position in _LISTS:
+        if name in existing_lists:
+            log.append(f"– List '{name}' already exists, skipping")
+            continue
+        r = httpx.post(
+            f"{base_url}/api/boards/{board_id}/lists",
+            headers=headers,
+            json={"name": name, "position": position, "type": "active"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        log.append(f"✓ List '{name}' created")
+        logger.info("[init-planka] list '%s' created", name)
+
+    # ── 5. Create custom field group + fields ─────────────────────────────────
+    logger.info("[init-planka] step 5/6 — ensure custom fields")
+    resp = httpx.get(f"{base_url}/api/boards/{board_id}", headers=headers, timeout=10)
+    resp.raise_for_status()
+    included = resp.json().get("included", {})
+    existing_groups = included.get("customFieldGroups") or []
+    existing_fields = {cf["name"] for cf in (included.get("customFields") or [])}
+
+    group_name = "Research Config"
+    group_id = next((g["id"] for g in existing_groups if g["name"] == group_name), None)
+    if group_id:
+        log.append(f"– Custom field group '{group_name}' already exists, skipping")
+    else:
+        r = httpx.post(
+            f"{base_url}/api/boards/{board_id}/custom-field-groups",
+            headers=headers,
+            json={"name": group_name, "position": 1},
+            timeout=10,
+        )
+        r.raise_for_status()
+        group_id = r.json()["item"]["id"]
+        log.append(f"✓ Custom field group '{group_name}' created")
+        logger.info("[init-planka] custom field group '%s' created  id=%s", group_name, group_id)
+
+    for position, name in enumerate(["max_loops"], start=1):
+        if name in existing_fields:
+            log.append(f"– Custom field '{name}' already exists, skipping")
+            continue
+        r = httpx.post(
+            f"{base_url}/api/custom-field-groups/{group_id}/custom-fields",
+            headers=headers,
+            json={"name": name, "position": position},
+            timeout=10,
+        )
+        r.raise_for_status()
+        log.append(f"✓ Custom field '{name}' created")
+        logger.info("[init-planka] custom field '%s' created", name)
+
+    # ── 6. Create webhook ─────────────────────────────────────────────────────
+    logger.info("[init-planka] step 6/6 — ensure webhook  url=%r", webhook_url)
+    resp = httpx.get(f"{base_url}/api/webhooks", headers=headers, timeout=10)
+    existing_webhooks = resp.json().get("items", []) if resp.status_code == 200 else []
+    existing_webhook = next((w for w in existing_webhooks if w.get("url") == webhook_url), None)
+
+    if existing_webhook:
+        log.append(f"– Webhook '{webhook_url}' already exists, skipping")
+    else:
+        r = httpx.post(
+            f"{base_url}/api/webhooks",
+            headers=headers,
+            json={"name": "agentic-research", "url": webhook_url, "events": "cardUpdate"},
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            log.append(f"✓ Webhook created → {webhook_url}")
+            logger.info("[init-planka] webhook created  url=%r", webhook_url)
+        else:
+            log.append(
+                f"✗ Webhook creation failed ({r.status_code}) — set it manually: "
+                f"Planka → Admin → Webhooks → Create Webhook  |  URL: {webhook_url}  |  Events: cardUpdate"
+            )
+            logger.warning("[init-planka] webhook creation failed  status=%s body=%s", r.status_code, r.text[:120])
+
+    # ── Emit .env update instructions to logs ─────────────────────────────────
+    env_instructions = (
+        f"Update your .env file with:\n"
+        f"  PLANKA_TOKEN={token}\n"
+        f"  PLANKA_BOARD_ID={board_id}"
+    )
+    logger.info("[init-planka] DONE — %s", env_instructions)
+
+    return {
+        "status": "ok",
+        "token": token,
+        "board_id": board_id,
+        "log": log,
+        "env_update_required": env_instructions,
+    }
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
