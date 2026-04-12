@@ -183,16 +183,22 @@ def run_once(
             raise ValueError(f"Unsupported LLM target: {target}")
 
         logger.info(
-            "run_once [%s] cwd=%s command=%s",
+            "run_once [%s] cwd=%s prompt_len=%d command=%s",
             target.value,
             work_dir or "(inherit)",
+            len(prompt),
             " ".join(str(c) for c in command),
         )
         logger.debug("run_once [%s] prompt_file=%s\n%s", target.value, prompt_file, prompt)
 
         # --- Quota-aware retry loop ---
         completed = None
+        _t0 = time.time()
         for quota_attempt in range(_max_retries + 1):
+            if quota_attempt > 0:
+                logger.info(
+                    "run_once [%s] retry attempt=%d (quota wait)", target.value, quota_attempt + 1
+                )
             try:
                 completed = subprocess.run(
                     command,
@@ -260,9 +266,10 @@ def run_once(
             except json.JSONDecodeError:
                 pass
 
+        _elapsed = time.time() - _t0
         logger.info(
-            "run_once [%s] completed. stdout_len=%d stderr_len=%d",
-            target.value, len(raw_stdout), len((completed.stderr or "").strip()),
+            "run_once [%s] completed. elapsed=%.1fs stdout_len=%d stderr_len=%d",
+            target.value, _elapsed, len(raw_stdout), len((completed.stderr or "").strip()),
         )
         logger.debug("run_once [%s] stdout:\n%s", target.value, raw_stdout[:2000])
         output_file.write_text(raw_stdout, encoding=encoding)

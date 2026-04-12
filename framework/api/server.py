@@ -151,8 +151,12 @@ def _slugify(name: str) -> str:
 
 def _run_resume_bg(project_id: str, decision: dict) -> None:
     """Background: resume a paused graph thread (plan-approval interrupt) and update card."""
+    logger.info(
+        "[resume_bg] START  project='%s' decision=%s", project_id, decision.get("action")
+    )
     try:
         graph = _get_graph(project_id)
+        logger.info("[resume_bg] invoking graph.invoke(Command(resume=...))  project='%s'", project_id)
         graph.invoke(Command(resume=decision), config=_thread_config(project_id))
 
         state = graph.get_state(config=_thread_config(project_id))
@@ -185,9 +189,15 @@ def _run_resume_bg(project_id: str, decision: dict) -> None:
 
 def _finish_run(project_id: str, last_result: str, last_reason: str) -> None:
     """Move card to Done/Review/Planning based on graph's final last_result."""
+    logger.info(
+        "[finish_run] project='%s' last_result=%s reason=%r",
+        project_id, last_result, last_reason[:200],
+    )
     if last_result == "PASS":
+        logger.info("[finish_run] project='%s' → DONE", project_id)
         _move_planka_card(project_id, _COL_DONE)
     elif last_result == "TERMINATE":
+        logger.info("[finish_run] project='%s' → REVIEW (TERMINATE)", project_id)
         if _planka_sink:
             _planka_sink.post_comment(
                 project_id,
@@ -195,24 +205,36 @@ def _finish_run(project_id: str, last_result: str, last_reason: str) -> None:
             )
         _move_planka_card(project_id, _COL_REVIEW)
     else:
+        logger.warning(
+            "[finish_run] project='%s' unexpected last_result=%r → PLANNING", project_id, last_result
+        )
         _move_planka_card(project_id, _COL_PLANNING)
 
 
 def _run_start_bg(project_id: str, initial_state: dict) -> None:
     """Background: start a new graph thread. Card should already be in Verify."""
+    logger.info(
+        "[start_bg] START  project='%s' goal=%r max_loops=%s",
+        project_id,
+        str(initial_state.get("loop_goal", ""))[:120],
+        initial_state.get("max_loops"),
+    )
     try:
         project = get_project(project_id)
         if not project:
-            logger.error("Cannot start: project '%s' not found.", project_id)
+            logger.error("[start_bg] project '%s' not found in DB — aborting.", project_id)
             return
         plugin = resolve_plugin(project["plugin_name"])
+        logger.info(
+            "[start_bg] plugin resolved: %s  project='%s'", plugin.name, project_id
+        )
         config = {
             "db_url": DATABASE_URL,
             **(project.get("config") or {}),
             "planka_sink": _planka_sink,
         }
         graph = get_or_build_graph(plugin, config)
-
+        logger.info("[start_bg] invoking graph  project='%s'", project_id)
         graph.invoke(initial_state, config=_thread_config(project_id))
 
         state = graph.get_state(config=_thread_config(project_id))
@@ -265,9 +287,13 @@ def _run_spec_review_bg(
       4. Download spec.md attachment — abort if missing.
       5. Invoke spec_review_graph with initial state.
     """
-    logger.info("[spec-review] START  card='%s' project_id='%s'", card_name, project_id)
+    logger.info(
+        "[spec-review] START  card=%r card_id=%s project_id=%s",
+        card_name, card_id, project_id,
+    )
 
     # --- 1. Idempotency ---
+    logger.info("[spec-review] step 1/6 — idempotency check  project_id=%s", project_id)
     existing = get_project(project_id, DATABASE_URL)
     if existing and (existing.get("config") or {}).get("review_in_progress"):
         started_at = (existing.get("config") or {}).get("review_started_at") or 0
@@ -286,11 +312,15 @@ def _run_spec_review_bg(
                 project_id, age_seconds,
             )
             _clear_review_flag(project_id)
+    else:
+        logger.info("[spec-review] idempotency OK — no in-progress review found.")
 
     try:
         # --- 2. Cache card_id + upsert project stub ---
+        logger.info("[spec-review] step 2/6 — cache card_id + upsert project stub")
         if _planka_sink:
             _planka_sink.cache_card_id(project_id, card_id)
+            logger.info("[spec-review] card_id cached: %s → %s", project_id, card_id)
 
         create_project(
             project_id=project_id,
@@ -300,14 +330,20 @@ def _run_spec_review_bg(
             config={"review_in_progress": True, "review_started_at": time.time()},
             db_url=DATABASE_URL,
         )
+        logger.info("[spec-review] project stub upserted: project_id=%s name=%r", project_id, card_name)
 
         # --- 3. Ensure thread_id in card description ---
+        logger.info("[spec-review] step 3/6 — ensure thread_id in card description")
         if not _extract_thread_id(description):
             new_desc = f"thread_id: {project_id}\n\n{description or ''}"
             if _planka_sink:
                 _planka_sink.update_card_description(project_id, new_desc)
+            logger.info("[spec-review] thread_id injected into card description.")
+        else:
+            logger.info("[spec-review] thread_id already present in description.")
 
         # --- 4. Download spec.md attachment ---
+        logger.info("[spec-review] step 4/6 — download spec.md attachment  card_id=%s", card_id)
         spec_path = _planka_sink.download_latest_spec_attachment(card_id) if _planka_sink else None
         if not spec_path:
             logger.warning("[spec-review] ABORT  no spec.md attachment for card '%s'.", card_name)
@@ -325,15 +361,20 @@ def _run_spec_review_bg(
             _clear_review_flag(project_id)
             _move_planka_card(project_id, _COL_PLANNING)
             return
-        logger.info("[spec-review] spec.md saved to %s", spec_path)
+        logger.info("[spec-review] spec.md downloaded → %s", spec_path)
 
         # --- 5. Fetch Planka comment thread for Q&A detection ---
+        logger.info("[spec-review] step 5/6 — fetch Planka comments  card_id=%s", card_id)
         planka_comments: list = []
         if _planka_sink:
             planka_comments = _planka_sink.get_card_comments(card_id)
-            logger.info("[spec-review] fetched %d comment(s) from card '%s'", len(planka_comments), card_id)
+            logger.info(
+                "[spec-review] fetched %d comment(s) from card '%s'",
+                len(planka_comments), card_id,
+            )
 
         # --- 6. Invoke spec_review_graph ---
+        logger.info("[spec-review] step 6/6 — invoking spec_review_graph  project_id=%s", project_id)
         initial_state: SpecReviewState = {
             "project_id": project_id,
             "card_id": card_id,
@@ -362,6 +403,7 @@ def _run_spec_review_bg(
         logger.info("[spec-review] DONE  graph completed for project '%s'.", project_id)
 
         if spec_path and _planka_sink:
+            logger.info("[spec-review] uploading work_dir files to card '%s'", card_id)
             _upload_work_dir_files(card_id, str(Path(spec_path).parent))
 
     except Exception as e:
@@ -477,11 +519,18 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
     if not list_name or current_list_id == prev_list_id:
         return {"status": "ignored", "reason": "not a list change"}
 
-    logger.info("Card '%s' moved to list '%s'", card_name, list_name)
+    logger.info(
+        "webhook: card_id=%s card_name=%r list=%r prev_list_id=%s",
+        card_id, card_name, list_name, prev_list_id,
+    )
 
     # Spec Pending Review: trigger dual-LLM agent
     if list_name == _COL_SPEC_PENDING:
         project_id = _extract_thread_id(description) or _slugify(card_name) or card_id
+        logger.info(
+            "webhook → spec_review queued: card_name=%r project_id=%s card_id=%s",
+            card_name, project_id, card_id,
+        )
         background_tasks.add_task(
             _run_spec_review_bg, project_id, card_id, card_name, description
         )
@@ -489,15 +538,17 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # Only handle Verify and Failed columns
     if list_name not in (_COL_VERIFY, _COL_FAILED):
+        logger.debug("webhook: ignoring list '%s'", list_name)
         return {"status": "ignored", "list": list_name}
 
     project_id = _extract_thread_id(description)
     if not project_id:
-        logger.warning("Could not extract thread_id from card %s.", card_id)
+        logger.warning("webhook: no thread_id in card '%s' (card_id=%s)", card_name, card_id)
         return {"status": "error", "detail": "thread_id not found in card description"}
 
     project = get_project(project_id)
     if project is None:
+        logger.warning("webhook: project '%s' not found in DB.", project_id)
         return {"status": "error", "detail": f"Project '{project_id}' not found."}
 
     if list_name == _COL_VERIFY:
@@ -539,7 +590,9 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
         if has_checkpoint:
             notes = _get_latest_card_comment(card_id) if PLANKA_URL and PLANKA_TOKEN else ""
             background_tasks.add_task(_run_resume_bg, project_id, {"action": "terminate", "notes": notes})
-            logger.info("Planka webhook: project=%s terminate active checkpoint", project_id)
+            logger.info("[failed] project='%s' → terminate active checkpoint", project_id)
+        else:
+            logger.warning("[failed] project='%s' no active checkpoint to terminate", project_id)
         return {"status": "ok", "project_id": project_id, "action": "terminate"}
 
 

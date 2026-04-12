@@ -23,6 +23,7 @@ For testing, see tests/test_llm_providers.py.
 from __future__ import annotations
 
 import os
+import time
 import logging
 from typing import Callable
 
@@ -64,9 +65,14 @@ class LLMProviderFactory:
             if builder is None:
                 logger.warning("Unknown provider '%s'. Supported: %s", provider, SUPPORTED_PROVIDERS)
                 return None
-            return builder()
+            fn = builder()
+            if fn is None:
+                logger.warning("Provider '%s' returned None (missing key or dependency).", provider)
+            else:
+                logger.info("Provider '%s' built successfully.", provider)
+            return fn
         except Exception as e:
-            logger.debug("Provider '%s' unavailable: %s", provider, e)
+            logger.warning("Provider '%s' unavailable: %s", provider, e)
             return None
 
 
@@ -113,6 +119,8 @@ class LLMProviderFactory:
         model = os.getenv("CODEX_MODEL", "codex-mini-latest")
 
         def _fn(prompt: str, **kwargs) -> str:
+            logger.info("codex-api: calling model=%s prompt_len=%d", model, len(prompt))
+            t0 = time.time()
             r = httpx.post(
                 f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -124,7 +132,11 @@ class LLMProviderFactory:
                 timeout=120,
             )
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            result = r.json()["choices"][0]["message"]["content"]
+            logger.info(
+                "codex-api: done elapsed=%.1fs response_len=%d", time.time() - t0, len(result)
+            )
+            return result
 
         return _fn
 
@@ -164,12 +176,19 @@ class LLMProviderFactory:
         client = anthropic.Anthropic(api_key=api_key)
 
         def _fn(prompt: str, **kwargs) -> str:
+            logger.info("claude-api: calling model=%s prompt_len=%d", model, len(prompt))
+            t0 = time.time()
             msg = client.messages.create(
                 model=model,
                 max_tokens=4096,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return msg.content[0].text
+            elapsed = time.time() - t0
+            result = msg.content[0].text
+            logger.info(
+                "claude-api: done elapsed=%.1fs response_len=%d", elapsed, len(result)
+            )
+            return result
 
         return _fn
 
@@ -189,6 +208,8 @@ class LLMProviderFactory:
         model    = os.getenv("OPENCODE_MODEL", "llama3.2")
 
         def _fn(prompt: str, **kwargs) -> str:
+            logger.info("opencode-api: calling model=%s prompt_len=%d", model, len(prompt))
+            t0 = time.time()
             r = httpx.post(
                 f"{base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -200,7 +221,11 @@ class LLMProviderFactory:
                 timeout=120,
             )
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            result = r.json()["choices"][0]["message"]["content"]
+            logger.info(
+                "opencode-api: done elapsed=%.1fs response_len=%d", time.time() - t0, len(result)
+            )
+            return result
 
         return _fn
 
@@ -217,6 +242,12 @@ class LLMProviderFactory:
         model = genai.GenerativeModel(model_name)
 
         def _fn(prompt: str, **kwargs) -> str:
-            return model.generate_content(prompt).text
+            logger.info("gemini-api: calling model=%s prompt_len=%d", model_name, len(prompt))
+            t0 = time.time()
+            result = model.generate_content(prompt).text
+            logger.info(
+                "gemini-api: done elapsed=%.1fs response_len=%d", time.time() - t0, len(result)
+            )
+            return result
 
         return _fn

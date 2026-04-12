@@ -71,18 +71,37 @@ class SpecReviewState(TypedDict):
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _post_spec_comment(sink, project_id: str, text: str) -> None:
+    """Post a Planka comment for spec review progress. Non-blocking."""
+    if sink is None:
+        return
+    try:
+        sink.post_comment(project_id, text)
+    except Exception as e:
+        logger.warning("spec_review Planka comment failed (project='%s'): %s", project_id, e)
+
+
+# ---------------------------------------------------------------------------
 # Node implementations (節點實作)
 # ---------------------------------------------------------------------------
 
-def _spec_review_init(state: dict) -> dict:
+def _spec_review_init(state: dict, config: RunnableConfig) -> dict:
     """
     Initialise the spec review state.
     Reads spec file content; sets participants, total_rounds, current_round=0.
     """
+    project_id = state.get("project_id", "")
+    cfg = config.get("configurable", {})
+    sink = cfg.get("planka_sink")
+
     llm_chain_str = (os.getenv("LLM_CHAIN") or "").strip()
     participants = [p.strip() for p in llm_chain_str.split(",") if p.strip()]
     if not participants:
         logger.error("spec_review_init: LLM_CHAIN is empty — aborting.")
+        _post_spec_comment(sink, project_id, "[SPEC-REVIEW] ABORT\nLLM_CHAIN env var is empty. Cannot run spec review.")
         return {
             "participants": [],
             "total_rounds": 0,
@@ -98,6 +117,7 @@ def _spec_review_init(state: dict) -> dict:
         current_spec_md = Path(spec_path).read_text(encoding="utf-8")
     except Exception as e:
         logger.error("spec_review_init: cannot read spec file '%s': %s", spec_path, e)
+        _post_spec_comment(sink, project_id, f"[SPEC-REVIEW] ABORT\nCannot read spec file: {e}")
         return {
             "participants": participants,
             "total_rounds": 2,
@@ -123,9 +143,17 @@ def _spec_review_init(state: dict) -> dict:
         has_pending_qa = False
         total_rounds = 2  # initial (llm-1) + synthesize (llm-2)
 
+    mode = "refine (Q&A detected)" if has_pending_qa else "initial"
     logger.info(
         "spec_review_init: project='%s' participants=%s total_rounds=%d has_pending_qa=%s",
-        state.get("project_id"), participants, total_rounds, has_pending_qa,
+        project_id, participants, total_rounds, has_pending_qa,
+    )
+    _post_spec_comment(
+        sink, project_id,
+        f"[SPEC-REVIEW] START\n"
+        f"mode: {mode}\n"
+        f"providers: {', '.join(participants)}\n"
+        f"total_rounds: {total_rounds}",
     )
     return {
         "participants": participants,
@@ -195,9 +223,19 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
         role = "synthesize"
         provider_name = participants[-1]
 
+    project_id = state.get("project_id", "")
+    cfg = config.get("configurable", {})
+    sink = cfg.get("planka_sink")
+
     logger.info(
         "spec_review_round: project='%s' round=%d/%d role=%s provider=%s",
-        state.get("project_id"), current_round + 1, total_rounds, role, provider_name,
+        project_id, current_round + 1, total_rounds, role, provider_name,
+    )
+    _post_spec_comment(
+        sink, project_id,
+        f"[SPEC-REVIEW] ROUND {current_round + 1}/{total_rounds}\n"
+        f"role: {role}\n"
+        f"provider: {provider_name}",
     )
 
     # Build LLM callable
@@ -275,6 +313,12 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
             "spec_review_round: reviewer '%s' raised %d notes.",
             provider_name, len(result.questions),
         )
+        _post_spec_comment(
+            sink, project_id,
+            f"[SPEC-REVIEW] ROUND {current_round + 1} DONE\n"
+            f"role: {role}  provider: {provider_name}\n"
+            f"notes raised: {len(result.questions)}",
+        )
     else:
         # Author / synthesizer: update the spec
         updates["current_spec_md"] = result.enhanced_spec_md
@@ -285,9 +329,21 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
                 "spec_review_round: %s role resulted in need_update (%d questions).",
                 role, len(result.questions),
             )
+            _post_spec_comment(
+                sink, project_id,
+                f"[SPEC-REVIEW] ROUND {current_round + 1} DONE\n"
+                f"role: {role}  provider: {provider_name}\n"
+                f"status: need_update  questions: {len(result.questions)}",
+            )
         else:
             updates["status"] = "in_progress"
             logger.info("spec_review_round: %s role completed (pass).", role)
+            _post_spec_comment(
+                sink, project_id,
+                f"[SPEC-REVIEW] ROUND {current_round + 1} DONE\n"
+                f"role: {role}  provider: {provider_name}\n"
+                f"status: pass",
+            )
 
     return updates
 
@@ -377,6 +433,14 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
 
     _move("Verify")
     logger.info("spec_finalize: card '%s' moved to Verify.", project_id)
+    if sink:
+        sink.post_comment(
+            project_id,
+            f"[SPEC-REVIEW] PASS\n"
+            f"plugin: {plugin_name}\n"
+            f"hypothesis: {str(hypothesis)[:200]}\n"
+            f"Card moved to Verify.",
+        )
 
     if launch_research is not None:
         try:

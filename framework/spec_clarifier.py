@@ -108,12 +108,24 @@ def run_spec_agent(
         prompt = _gemini_prefix(role, work_dir, round_index) + prompt
 
     logger.info(
-        "run_spec_agent [%s] spec_path=%s work_dir=%s\n--- prompt ---\n%s\n--- end prompt ---",
-        role, spec_path, work_dir, prompt,
+        "run_spec_agent [%s] spec_path=%s work_dir=%s prompt_len=%d",
+        role, spec_path, work_dir, len(prompt),
+    )
+    logger.debug(
+        "run_spec_agent [%s] prompt preview:\n%s\n...(truncated)",
+        role, prompt[:800],
     )
 
+    import time as _time
+    _t0 = _time.time()
+    logger.info("run_spec_agent [%s] calling LLM provider=%s ...", role, provider_name)
     try:
         response = llm_fn(prompt, cwd=work_dir)
+        _elapsed = _time.time() - _t0
+        logger.info(
+            "run_spec_agent [%s] LLM call done. elapsed=%.1fs response_len=%d",
+            role, _elapsed, len(response or ""),
+        )
         # Persist LLM stdout response so it can be uploaded to the card later.
         llm_out_path = Path(work_dir) / f"llm_response_{role}.txt"
         try:
@@ -121,7 +133,10 @@ def run_spec_agent(
         except Exception as _e:
             logger.warning("Could not save LLM response to '%s': %s", llm_out_path, _e)
     except Exception as e:
-        logger.warning("run_spec_agent LLM call failed (%s): %s", role, e)
+        _elapsed = _time.time() - _t0
+        logger.warning(
+            "run_spec_agent LLM call failed (%s) after %.1fs: %s", role, _elapsed, e
+        )
         return SpecAgentResult(
             needs_user_input=True,
             questions=[f"LLM call failed: {e}"],

@@ -83,10 +83,10 @@ class PlankaSink:
         """
         card_id = self.resolve_card_id(project_id)
         if not card_id:
-            logger.debug("post_comment: no card found for project '%s', skipping.", project_id)
+            logger.warning("post_comment: no card found for project '%s', skipping.", project_id)
             return
         url = f"{self._url}/api/cards/{card_id}/comments"
-        logger.debug("post_comment → POST %s", url)
+        logger.info("post_comment → POST %s  text_preview=%r", url, text[:80])
         try:
             resp = httpx.post(
                 url,
@@ -95,6 +95,7 @@ class PlankaSink:
                 timeout=10,
             )
             resp.raise_for_status()
+            logger.info("post_comment: OK  project='%s'", project_id)
         except Exception as e:
             logger.warning(
                 "Planka post_comment failed (project '%s'): url=%r  %s(%s)",
@@ -112,7 +113,7 @@ class PlankaSink:
             logger.debug("update_card_description: no card found for project '%s', skipping.", project_id)
             return
         url = f"{self._url}/api/cards/{card_id}"
-        logger.debug("update_card_description → PATCH %s", url)
+        logger.info("update_card_description → PATCH %s  project='%s'", url, project_id)
         try:
             resp = httpx.patch(
                 url,
@@ -147,7 +148,7 @@ class PlankaSink:
         Non-blocking: returns None on any error.
         """
         url = f"{self._url}/api/cards/{card_id}"
-        logger.debug("download_latest_spec_attachment → GET %s", url)
+        logger.info("download_latest_spec_attachment → GET %s", url)
         try:
             resp = httpx.get(
                 url,
@@ -175,7 +176,10 @@ class PlankaSink:
             )[0]
             att_id = latest.get("id", "")
             att_name = latest.get("name", "spec.md")
-            logger.debug("download_latest_spec_attachment: found '%s' (id=%s)", att_name, att_id)
+            logger.info(
+                "download_latest_spec_attachment: found '%s' (id=%s) from %d total attachments",
+                att_name, att_id, len(attachments),
+            )
             save_path = _make_volume_path(att_name)
             if save_path is None:
                 return None
@@ -231,7 +235,7 @@ class PlankaSink:
                 timeout=30,
             )
             resp.raise_for_status()
-            logger.debug("Uploaded spec attachment '%s' to card '%s'.", filename, card_id)
+            logger.info("upload_spec_attachment: OK  filename='%s' card_id=%s", filename, card_id)
         except Exception as e:
             logger.warning("upload_spec_attachment failed for card '%s': %s", card_id, e)
 

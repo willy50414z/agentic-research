@@ -68,7 +68,7 @@ class StrategyName(IStrategy):
 ## 輸出
 
 **第一步**：用工具將完整的 Freqtrade 策略類別寫入：
-`{STRATEGY_DIR}/{strategy_name}.py`
+`{STRATEGY_DIR}/{{strategy_name}}.py`
 
 類別名稱必須與檔名一致（CamelCase），且須與規格中的策略邏輯完全對應。
 
@@ -77,7 +77,7 @@ class StrategyName(IStrategy):
 ```json
 {{
   "strategy_name": "類別名稱（與 .py 檔名一致）",
-  "strategy_file": "{STRATEGY_DIR}/{strategy_name}.py",
+  "strategy_file": "{STRATEGY_DIR}/{{strategy_name}}.py",
   "timeframe": "來自規格",
   "stoploss": 停損數值（負數浮點數）,
   "parameters": {{
