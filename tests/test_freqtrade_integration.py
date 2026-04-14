@@ -106,3 +106,70 @@ class TestConfigGenerator:
         path = generate_config(spec, tmp_path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
         assert abs(cfg["fee"] - 0.001) < 1e-9
+
+
+# ── Task 2: freqtrade_runner ──────────────────────────────────────────────────
+
+class TestFreqtradeRunner:
+    def test_success_returns_zip_path(self, tmp_path):
+        """Mock subprocess success — returns newest .zip in results_dir."""
+        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        results_dir = tmp_path / "backtest_results"
+        results_dir.mkdir()
+        zip_path = results_dir / "backtest-result-2024-01-01_00-00-00.zip"
+
+        def _fake_run(*args, **kwargs):
+            zip_path.write_bytes(b"PK")  # create zip when subprocess "runs"
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=_fake_run):
+            result = run_freqtrade_backtest(
+                strategy_name="TestStrategy",
+                strategy_dir=str(tmp_path / "strategies"),
+                config_path=str(tmp_path / "config.json"),
+                userdir=str(tmp_path / "user_data"),
+                timerange="20230101-20231231",
+                results_dir=str(results_dir),
+            )
+        assert result == zip_path
+
+    def test_cli_not_found_raises(self, tmp_path):
+        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        results_dir = tmp_path / "backtest_results"
+        results_dir.mkdir()
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            with pytest.raises(FileNotFoundError, match="freqtrade CLI not found"):
+                run_freqtrade_backtest(
+                    strategy_name="S", strategy_dir=".", config_path="c.json",
+                    userdir=".", timerange="20230101-20231231",
+                    results_dir=str(results_dir),
+                )
+
+    def test_nonzero_exit_raises_runtime_error(self, tmp_path):
+        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        results_dir = tmp_path / "backtest_results"
+        results_dir.mkdir()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Error line 1\nError line 2"
+            )
+            with pytest.raises(RuntimeError, match="exited with code 1"):
+                run_freqtrade_backtest(
+                    strategy_name="S", strategy_dir=".", config_path="c.json",
+                    userdir=".", timerange="20230101-20231231",
+                    results_dir=str(results_dir),
+                    max_retries=1,
+                )
+
+    def test_no_new_zip_raises_value_error(self, tmp_path):
+        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        results_dir = tmp_path / "backtest_results"
+        results_dir.mkdir()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            with pytest.raises(ValueError, match="no new .zip"):
+                run_freqtrade_backtest(
+                    strategy_name="S", strategy_dir=".", config_path="c.json",
+                    userdir=".", timerange="20230101-20231231",
+                    results_dir=str(results_dir),
+                )
