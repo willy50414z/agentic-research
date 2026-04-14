@@ -184,6 +184,11 @@ def _run_resume_bg(project_id: str, decision: dict) -> None:
         logger.info("Resumed project '%s' with action: %s", project_id, decision.get("action"))
     except Exception as e:
         logger.exception("Background resume failed for project '%s': %s", project_id, e)
+        if _planka_sink:
+            _planka_sink.post_comment(
+                project_id,
+                f"**[ERROR] 恢復執行失敗 — 已移至 Failed**\n\n```\n{type(e).__name__}: {e}\n```",
+            )
         _move_planka_card(project_id, _COL_FAILED)
 
 
@@ -264,6 +269,11 @@ def _run_start_bg(project_id: str, initial_state: dict) -> None:
         logger.info("Graph completed for project '%s' with result: %s", project_id, last_result)
     except Exception as e:
         logger.exception("Background start failed for project '%s': %s", project_id, e)
+        if _planka_sink:
+            _planka_sink.post_comment(
+                project_id,
+                f"**[ERROR] 執行失敗 — 已移至 Failed**\n\n```\n{type(e).__name__}: {e}\n```",
+            )
         _move_planka_card(project_id, _COL_FAILED)
 
 

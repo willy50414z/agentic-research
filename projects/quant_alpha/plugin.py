@@ -87,7 +87,7 @@ def _call_llm(prompt: str, cwd: str | None = None) -> str:
     Call Claude CLI via run_once. Returns raw stdout.
     Raises FileNotFoundError when Claude is not installed — caller must handle.
     """
-    return run_once(LLMTarget.CLAUDE, prompt, timeout=120, cwd=cwd)
+    return run_once(LLMTarget.CLAUDE, prompt, timeout=1200, cwd=cwd)
 
 
 def _read_json_file(path: Path) -> dict:
