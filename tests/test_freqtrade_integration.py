@@ -99,3 +99,10 @@ class TestConfigGenerator:
         bad_spec = {"trading_scope": {"timeframe": "1h", "exchange": "binance"}, "execution": {"fee": "0.10%"}}
         with pytest.raises(KeyError):
             generate_config(bad_spec, tmp_path)
+
+    def test_generate_config_fee_already_float(self, tmp_path):
+        from projects.quant_alpha.config_generator import generate_config
+        spec = {**SAMPLE_SPEC, "execution": {"fee": 0.001}}
+        path = generate_config(spec, tmp_path)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert abs(cfg["fee"] - 0.001) < 1e-9

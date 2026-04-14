@@ -19,9 +19,14 @@ def generate_config(spec: dict, work_dir: Path) -> Path:
     timeframe = scope["timeframe"]
     exchange  = scope["exchange"]
 
-    # Parse fee: "0.10%" → 0.001
-    fee_str = str(execution.get("fee", "0.1%")).rstrip("%")
-    fee_pct = float(fee_str) / 100
+    # Parse fee: "0.10%" → 0.001, or float 0.001 → 0.001
+    fee_raw = execution.get("fee", "0.1%")
+    if isinstance(fee_raw, str):
+        fee_pct = float(fee_raw.rstrip("%")) / 100
+    elif isinstance(fee_raw, (int, float)):
+        fee_pct = float(fee_raw)
+    else:
+        raise TypeError(f"fee must be a percentage string or float, got {type(fee_raw)}")
 
     # Derive stake_currency from pair: "BTC/USDT" → "USDT"
     stake_currency = pair.split("/")[1] if "/" in pair else "USDT"
