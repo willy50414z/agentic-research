@@ -173,3 +173,54 @@ class TestFreqtradeRunner:
                     userdir=".", timerange="20230101-20231231",
                     results_dir=str(results_dir),
                 )
+
+
+# ── Task 3: result_parser ─────────────────────────────────────────────────────
+
+class TestResultParser:
+    def test_parse_backtest_zip_basic(self, tmp_path):
+        from projects.quant_alpha.result_parser import parse_backtest_zip
+        zip_path = tmp_path / "backtest-result-2024.zip"
+        zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
+        metrics = parse_backtest_zip(zip_path, "TestRsiStrategy")
+        assert metrics["win_rate"] == pytest.approx(0.60)
+        assert metrics["profit_factor"] == pytest.approx(1.50)
+        assert metrics["max_drawdown"] == pytest.approx(0.12)
+        assert metrics["profit_total_pct"] == pytest.approx(25.0)
+        assert metrics["n_trades"] == 45
+        assert isinstance(metrics["trades"], list)
+
+    def test_parse_backtest_zip_wrong_strategy(self, tmp_path):
+        from projects.quant_alpha.result_parser import parse_backtest_zip
+        zip_path = tmp_path / "backtest-result-2024.zip"
+        zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
+        with pytest.raises(ValueError, match="not found"):
+            parse_backtest_zip(zip_path, "WrongStrategy")
+
+    def test_parse_backtest_zip_bad_zip(self, tmp_path):
+        from projects.quant_alpha.result_parser import parse_backtest_zip
+        bad_zip = tmp_path / "bad.zip"
+        bad_zip.write_bytes(b"not a zip")
+        with pytest.raises(ValueError, match="Invalid zip"):
+            parse_backtest_zip(bad_zip, "Any")
+
+    def test_write_loop_artifacts_creates_all_files(self, tmp_path):
+        from projects.quant_alpha.result_parser import write_loop_artifacts
+        is_m  = {"win_rate": 0.6, "profit_factor": 1.5, "max_drawdown": 0.12,
+                  "profit_total_pct": 25.0, "n_trades": 45, "trades": []}
+        oos_m = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
+                  "profit_total_pct": 20.0, "n_trades": 38, "trades": [
+                      {"pair": "BTC/USDT", "open_date": "2023-06-01 00:00:00",
+                       "close_date": "2023-06-02 00:00:00",
+                       "open_rate": 25000.0, "close_rate": 26000.0, "profit_ratio": 0.04}
+                  ]}
+        write_loop_artifacts(is_m, oos_m, tmp_path, loop=0)
+        assert (tmp_path / "loop_0_is.json").exists()
+        assert (tmp_path / "loop_0_oos.json").exists()
+        assert (tmp_path / "loop_0_trades.json").exists()
+        assert (tmp_path / "loop_0_signals.json").exists()
+        assert (tmp_path / "loop_0_report.html").exists()
+        is_data = json.loads((tmp_path / "loop_0_is.json").read_text())
+        assert is_data["win_rate"] == pytest.approx(0.6)
+        # Ensure trades list not included in metrics files
+        assert "trades" not in is_data
