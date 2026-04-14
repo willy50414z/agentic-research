@@ -29,11 +29,93 @@ from framework.plugin_interface import ResearchPlugin
 from framework.plugin_registry import register
 from framework.llm_agent.llm_svc import run_once
 from framework.llm_agent.llm_target import LLMTarget
-from projects.quant_alpha.backtest import run_backtest
-
 logger = logging.getLogger(__name__)
 
 ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR", "./artifacts"))
+BACKTEST_MODE = os.getenv("BACKTEST_MODE", "mock")
+
+
+# ---------------------------------------------------------------------------
+# Mock helpers (BACKTEST_MODE=mock, default)
+# ---------------------------------------------------------------------------
+
+def _mock_implement_result(state: dict) -> dict:
+    """Deterministic fake implement result — same hash seed as former stub."""
+    import hashlib
+    import random as _random
+
+    loop   = state.get("loop_index", 0)
+    plan   = state.get("implementation_plan", {}) or {}
+
+    seed_input = f"700{plan.get('strategy_name', '')}{sorted(plan.items())}"
+    seed = int(hashlib.md5(seed_input.encode()).hexdigest(), 16) % 100_000
+    rng  = _random.Random(seed)
+
+    n_trades     = rng.randint(20, 80)
+    win_rate     = round(rng.uniform(0.45, 0.75), 4)
+    total_return = round(rng.uniform(-0.10, 0.40), 4)
+    alpha_ratio  = round(rng.uniform(0.7, 2.5), 4)
+    max_drawdown = round(rng.uniform(0.05, 0.30), 4)
+    gross_profit = round(rng.uniform(0.1, 0.5), 4)
+    gross_loss   = round(rng.uniform(0.05, 0.4), 4)
+    profit_factor = round(gross_profit / gross_loss, 4) if gross_loss > 1e-9 else 9.99
+
+    is_result = {
+        "win_rate":          win_rate,
+        "alpha_ratio":       alpha_ratio,
+        "max_drawdown":      max_drawdown,
+        "n_trades":          n_trades,
+        "total_return":      total_return,
+        "profit_total_pct":  round(total_return * 100, 4),
+        "profit_factor":     profit_factor,
+    }
+
+    artifact_path = str(ARTIFACTS_DIR / f"loop_{loop}_train.json")
+    _write_artifact(artifact_path, json.dumps(
+        {"loop": loop, "plan": plan, "is_result": is_result}, indent=2))
+
+    return {
+        "needs_human_approval": False,
+        "is_metrics": is_result,
+        "artifacts": state.get("artifacts", []) + [
+            {"type": "train_result", "path": artifact_path}
+        ],
+    }
+
+
+def _mock_test_result(state: dict) -> dict:
+    """Deterministic fake test result — same hash seed as former stub."""
+    import hashlib
+    import random as _random
+
+    plan    = state.get("implementation_plan", {}) or {}
+    attempt = state.get("attempt_count", 0) + 1
+    n_bars  = 300 + attempt * 50
+
+    seed_input = f"{n_bars}{plan.get('strategy_name', '')}{sorted(plan.items())}"
+    seed = int(hashlib.md5(seed_input.encode()).hexdigest(), 16) % 100_000
+    rng  = _random.Random(seed)
+
+    n_trades     = rng.randint(20, 80)
+    win_rate     = round(rng.uniform(0.45, 0.75), 4)
+    total_return = round(rng.uniform(-0.10, 0.40), 4)
+    alpha_ratio  = round(rng.uniform(0.7, 2.5), 4)
+    max_drawdown = round(rng.uniform(0.05, 0.30), 4)
+    gross_profit = round(rng.uniform(0.1, 0.5), 4)
+    gross_loss   = round(rng.uniform(0.05, 0.4), 4)
+    profit_factor = round(gross_profit / gross_loss, 4) if gross_loss > 1e-9 else 9.99
+
+    return {
+        "attempt_count": attempt,
+        "test_metrics": {
+            "win_rate":      win_rate,
+            "alpha_ratio":   alpha_ratio,
+            "max_drawdown":  max_drawdown,
+            "n_trades":      n_trades,
+            "total_return":  total_return,
+            "profit_factor": profit_factor,
+        },
+    }
 
 _MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI")
 if _MLFLOW_URI:
@@ -178,21 +260,15 @@ class QuantAlphaPlugin(ResearchPlugin):
                 return {"last_result": "TERMINATE", "last_reason": reason,
                         "needs_human_approval": False}
 
-        # Run backtest on training window (first 700 bars)
-        train_result = run_backtest(plan, n_bars=700)
-        logger.info("[QuantAlpha] implement  train win_rate=%.4f  n_trades=%d",
-                    train_result["win_rate"], train_result["n_trades"])
+        if BACKTEST_MODE == "mock":
+            return _mock_implement_result(state)
 
-        artifact_path = str(ARTIFACTS_DIR / f"loop_{loop}_train.json")
-        _write_artifact(artifact_path, json.dumps(
-            {"loop": loop, "plan": plan, "train_result": train_result}, indent=2))
+        # ── Real mode ────────────────────────────────────────────────────────
+        return self._real_implement(state)
 
-        return {
-            "needs_human_approval": False,
-            "artifacts": state.get("artifacts", []) + [
-                {"type": "train_result", "path": artifact_path}
-            ],
-        }
+    def _real_implement(self, state: dict) -> dict:
+        """Real Freqtrade IS/OOS backtest. Filled in Task 6."""
+        raise NotImplementedError("Real implement_node not yet implemented")
 
     # ── test ──────────────────────────────────────────────────────────────────
 
@@ -203,20 +279,18 @@ class QuantAlphaPlugin(ResearchPlugin):
         logger.info("[QuantAlpha] test  loop=%d  attempt=%d  strategy=%s",
                     loop, attempt, plan.get("strategy_type"))
 
-        # Run backtest on test window (last 300 bars, offset by attempt for variety)
-        result = run_backtest(plan, n_bars=300 + attempt * 50)
-        logger.info("[QuantAlpha] test  win_rate=%.4f  alpha=%.4f  drawdown=%.4f",
-                    result["win_rate"], result["alpha_ratio"], result["max_drawdown"])
+        if BACKTEST_MODE == "mock":
+            return _mock_test_result(state)
 
+        # ── Real mode ────────────────────────────────────────────────────────
+        oos = state.get("oos_metrics", {})
+        logger.info("[QuantAlpha] test  win_rate=%.4f  drawdown=%.4f  pf=%.4f",
+                    oos.get("win_rate", 0), oos.get("max_drawdown", 0), oos.get("profit_factor", 0))
         return {
             "attempt_count": attempt,
             "test_metrics": {
-                "win_rate":      result["win_rate"],
-                "alpha_ratio":   result["alpha_ratio"],
-                "max_drawdown":  result["max_drawdown"],
-                "n_trades":      result["n_trades"],
-                "total_return":  result["total_return"],
-                "profit_factor": result.get("profit_factor", 0.0),
+                "is":  state.get("is_metrics", {}),
+                "oos": oos,
             },
         }
 

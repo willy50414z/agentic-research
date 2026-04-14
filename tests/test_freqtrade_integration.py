@@ -224,3 +224,37 @@ class TestResultParser:
         assert is_data["win_rate"] == pytest.approx(0.6)
         # Ensure trades list not included in metrics files
         assert "trades" not in is_data
+
+
+# ── Task 4: backtest real mode ────────────────────────────────────────────────
+
+class TestBacktestRealMode:
+    def test_run_backtest_is_oos_calls_runner_twice(self, tmp_path):
+        """run_backtest_is_oos should call run_freqtrade_backtest twice (IS, OOS)."""
+        from projects.quant_alpha import backtest as bt
+
+        fake_zip = tmp_path / "fake.zip"
+        fake_zip.write_bytes(_make_fixture_zip("TestRsiStrategy"))
+
+        with patch("projects.quant_alpha.backtest.run_freqtrade_backtest",
+                   return_value=fake_zip) as mock_runner, \
+             patch("projects.quant_alpha.backtest.generate_config",
+                   return_value=tmp_path / "config.json"):
+            is_m, oos_m = bt.run_backtest_is_oos(
+                spec=SAMPLE_SPEC,
+                plan=SAMPLE_PLAN,
+                work_dir=tmp_path,
+                userdir=tmp_path / "user_data",
+            )
+
+        assert mock_runner.call_count == 2
+        calls = mock_runner.call_args_list
+        assert calls[0].kwargs["timerange"] == "20220101-20221231"
+        assert calls[1].kwargs["timerange"] == "20230101-20231231"
+        assert is_m["win_rate"] == pytest.approx(0.60)
+        assert oos_m["win_rate"] == pytest.approx(0.60)
+
+    def test_to_freqtrade_timerange(self):
+        from projects.quant_alpha.backtest import _to_freqtrade_timerange
+        period = {"start": "2023-01-01", "end": "2023-12-31"}
+        assert _to_freqtrade_timerange(period) == "20230101-20231231"

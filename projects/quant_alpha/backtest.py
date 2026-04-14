@@ -1,47 +1,71 @@
+# projects/quant_alpha/backtest.py
 """
 projects/quant_alpha/backtest.py
 
-Stub backtest engine — returns deterministic fake metrics.
-Will be replaced with a real Freqtrade runner in a future iteration.
+Real Freqtrade backtest IS/OOS orchestrator.
+Calls config_generator, freqtrade_runner, result_parser.
 
 Usage:
-    from projects.quant_alpha.backtest import run_backtest
+    from projects.quant_alpha.backtest import run_backtest_is_oos
 
-    result = run_backtest(params, n_bars=1000)
-    # result: {"win_rate": ..., "alpha_ratio": ..., "max_drawdown": ...,
-    #          "n_trades": ..., "total_return": ..., "profit_factor": ...}
+    is_metrics, oos_metrics = run_backtest_is_oos(spec, plan, work_dir, userdir)
+    # Each metrics dict: {win_rate, profit_factor, max_drawdown,
+    #                     profit_total_pct, n_trades, trades}
 """
-
-import hashlib
-import random
+from pathlib import Path
 from typing import Any
 
+from projects.quant_alpha.config_generator import generate_config
+from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+from projects.quant_alpha.result_parser import parse_backtest_zip
 
-def run_backtest(params: dict[str, Any], n_bars: int = 1000) -> dict[str, Any]:
+
+def run_backtest_is_oos(
+    spec: dict[str, Any],
+    plan: dict[str, Any],
+    work_dir: Path,
+    userdir: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """
-    Stub: returns deterministic fake metrics based on params and n_bars.
-    Strategy type and internal parameters are intentionally ignored —
-    the real Freqtrade runner will use them.
+    Run IS and OOS backtests via Freqtrade CLI.
+    Returns (is_metrics, oos_metrics).
+
+    IS timerange  ← spec["data"]["train_period"]
+    OOS timerange ← spec["data"]["test_period"]
     """
-    seed_input = f"{n_bars}{params.get('strategy_name', '')}{sorted(params.items())}"
-    seed = int(hashlib.md5(seed_input.encode()).hexdigest(), 16) % 100_000
-    rng = random.Random(seed)
+    strategy_name = plan["strategy_name"]
+    strategy_dir  = str(work_dir / "strategies")
+    results_dir   = str(work_dir / "backtest_results")
 
-    n_trades     = rng.randint(20, 80)
-    win_rate     = round(rng.uniform(0.45, 0.75), 4)
-    total_return = round(rng.uniform(-0.10, 0.40), 4)
-    alpha_ratio  = round(rng.uniform(0.7, 2.5), 4)
-    max_drawdown = round(rng.uniform(0.05, 0.30), 4)
+    config_path = generate_config(spec, work_dir)
 
-    gross_profit = round(rng.uniform(0.1, 0.5), 4)
-    gross_loss   = round(rng.uniform(0.05, 0.4), 4)
-    profit_factor = round(gross_profit / gross_loss, 4) if gross_loss > 1e-9 else 9.99
+    is_range  = _to_freqtrade_timerange(spec["data"]["train_period"])
+    oos_range = _to_freqtrade_timerange(spec["data"]["test_period"])
 
-    return {
-        "win_rate":      win_rate,
-        "alpha_ratio":   alpha_ratio,
-        "max_drawdown":  max_drawdown,
-        "n_trades":      n_trades,
-        "total_return":  total_return,
-        "profit_factor": profit_factor,
-    }
+    is_zip = run_freqtrade_backtest(
+        strategy_name=strategy_name,
+        strategy_dir=strategy_dir,
+        config_path=str(config_path),
+        userdir=str(userdir),
+        timerange=is_range,
+        results_dir=results_dir,
+    )
+    oos_zip = run_freqtrade_backtest(
+        strategy_name=strategy_name,
+        strategy_dir=strategy_dir,
+        config_path=str(config_path),
+        userdir=str(userdir),
+        timerange=oos_range,
+        results_dir=results_dir,
+    )
+
+    is_metrics  = parse_backtest_zip(is_zip,  strategy_name)
+    oos_metrics = parse_backtest_zip(oos_zip, strategy_name)
+    return is_metrics, oos_metrics
+
+
+def _to_freqtrade_timerange(period: dict[str, str]) -> str:
+    """{"start": "2023-01-01", "end": "2023-12-31"} → "20230101-20231231" """
+    start = str(period["start"]).replace("-", "")
+    end   = str(period["end"]).replace("-", "")
+    return f"{start}-{end}"
