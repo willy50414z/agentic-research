@@ -293,3 +293,34 @@ class TestRealImplementNode:
         assert result["is_metrics"]["win_rate"] == pytest.approx(0.6)
         assert result["oos_metrics"]["win_rate"] == pytest.approx(0.55)
         assert mock_bt.call_count == 1
+
+
+# ── Task 8: freqtrade_cli ─────────────────────────────────────────────────────
+
+class TestFreqtradeCli:
+    def test_cli_backtest_dispatches_to_backtest_module(self, tmp_path):
+        """freqtrade_cli backtest subcommand calls run_backtest_is_oos."""
+        spec_path = tmp_path / "spec.json"
+        plan_path = tmp_path / "plan.json"
+        spec_path.write_text(json.dumps(SAMPLE_SPEC), encoding="utf-8")
+        plan_path.write_text(json.dumps(SAMPLE_PLAN), encoding="utf-8")
+
+        fake_is  = {"win_rate": 0.6, "profit_factor": 1.5, "max_drawdown": 0.12,
+                    "profit_total_pct": 25.0, "n_trades": 45, "trades": []}
+        fake_oos = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
+                    "profit_total_pct": 20.0, "n_trades": 38, "trades": []}
+
+        with patch("projects.quant_alpha.freqtrade_cli.run_backtest_is_oos",
+                   return_value=(fake_is, fake_oos)) as mock_bt, \
+             patch("projects.quant_alpha.freqtrade_cli.write_loop_artifacts"):
+            from projects.quant_alpha import freqtrade_cli
+            freqtrade_cli.dispatch([
+                "backtest",
+                "--spec", str(spec_path),
+                "--plan", str(plan_path),
+                "--work-dir", str(tmp_path / "work"),
+                "--userdir", str(tmp_path / "user_data"),
+                "--loop", "0",
+            ])
+
+        mock_bt.assert_called_once()
