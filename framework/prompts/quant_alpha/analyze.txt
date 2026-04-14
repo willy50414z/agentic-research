@@ -30,10 +30,13 @@ OOS（樣本外，主要評估依據）：
   n_trades     ：{n_trades}
 
 通過條件（全部達到才算 PASS）：
-  win_rate      >= {target_win_rate}
-  alpha_ratio   >= 1.0
-  max_drawdown  <= 0.20
-  profit_factor >= {target_profit_factor}
+  OOS win_rate      >= {target_win_rate}
+  OOS max_drawdown  <= 0.20
+  OOS profit_factor >= {target_profit_factor}
+  OOS profit_factor >= IS profit_factor × 0.8  （防止過擬合）
+  OOS win_rate      >= IS win_rate × 0.8        （防止過擬合）
+
+注意：alpha_ratio 僅在 mock 模式下有效（>1.0 代表超越大盤）；Freqtrade 真實回測模式下為 0，不作為評估依據。
 
 步驟 3 — 用工具將分析結果寫入此目錄：
 `{OUTPUT_DIR}`
