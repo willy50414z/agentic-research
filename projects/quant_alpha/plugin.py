@@ -29,6 +29,8 @@ from framework.plugin_interface import ResearchPlugin
 from framework.plugin_registry import register
 from framework.llm_agent.llm_svc import run_once
 from framework.llm_agent.llm_target import LLMTarget
+from projects.quant_alpha.backtest import run_backtest_is_oos
+from projects.quant_alpha.result_parser import write_loop_artifacts
 logger = logging.getLogger(__name__)
 
 ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR", "./artifacts"))
@@ -187,6 +189,45 @@ def _write_artifact(path: str, content: str) -> None:
         f.write(content)
 
 
+def _append_execution_log(
+    loop: int,
+    plan: dict,
+    is_metrics: dict,
+    oos_metrics: dict,
+    result: str = "—",
+) -> None:
+    """Append one line to artifacts/execution_log.md."""
+    from datetime import datetime
+
+    log_path = ARTIFACTS_DIR / "execution_log.md"
+    ts       = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    strategy = plan.get("strategy_name", "?")
+    run_mode = plan.get("run_mode", "backtest")
+    is_pf    = is_metrics.get("profit_factor", 0)
+    is_wr    = is_metrics.get("win_rate", 0)
+    oos_pf   = oos_metrics.get("profit_factor", 0)
+    oos_wr   = oos_metrics.get("win_rate", 0)
+
+    line = (
+        f"| {ts} | loop {loop} | {strategy} | {run_mode} "
+        f"| IS pf={is_pf:.3f} wr={is_wr:.3f} "
+        f"| OOS pf={oos_pf:.3f} wr={oos_wr:.3f} "
+        f"| {result} |\n"
+    )
+
+    try:
+        if not log_path.exists():
+            log_path.write_text(
+                "| timestamp | loop | strategy | mode | IS | OOS | result |\n"
+                "|-----------|------|----------|------|-----|-----|--------|\n",
+                encoding="utf-8",
+            )
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError as e:
+        logger.warning("[QuantAlpha] execution_log write failed: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # Plugin
 # ---------------------------------------------------------------------------
@@ -267,8 +308,47 @@ class QuantAlphaPlugin(ResearchPlugin):
         return self._real_implement(state)
 
     def _real_implement(self, state: dict) -> dict:
-        """Real Freqtrade IS/OOS backtest. Filled in Task 6."""
-        raise NotImplementedError("Real implement_node not yet implemented")
+        """Real Freqtrade IS/OOS backtest."""
+        from datetime import datetime
+
+        loop     = state.get("loop_index", 0)
+        plan     = state.get("implementation_plan", {}) or {}
+        spec     = state.get("spec") or {}
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        work_dir  = ARTIFACTS_DIR / ".llm_io" / f"{loop}_{timestamp}"
+        userdir   = ARTIFACTS_DIR / "user_data"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        userdir.mkdir(parents=True, exist_ok=True)
+
+        logger.info("[QuantAlpha] real implement  loop=%d  work_dir=%s", loop, work_dir)
+
+        is_metrics, oos_metrics = run_backtest_is_oos(
+            spec=spec,
+            plan=plan,
+            work_dir=work_dir,
+            userdir=userdir,
+        )
+
+        write_loop_artifacts(is_metrics, oos_metrics, work_dir, loop=loop)
+        _append_execution_log(loop, plan, is_metrics, oos_metrics)
+
+        logger.info(
+            "[QuantAlpha] real implement  IS win_rate=%.4f pf=%.4f | OOS win_rate=%.4f pf=%.4f",
+            is_metrics.get("win_rate", 0),  is_metrics.get("profit_factor", 0),
+            oos_metrics.get("win_rate", 0), oos_metrics.get("profit_factor", 0),
+        )
+
+        artifact_path = str(work_dir / f"loop_{loop}_is.json")
+        return {
+            "needs_human_approval": False,
+            "is_metrics":           is_metrics,
+            "oos_metrics":          oos_metrics,
+            "artifacts": state.get("artifacts", []) + [
+                {"type": "is_result",  "path": artifact_path},
+                {"type": "oos_result", "path": str(work_dir / f"loop_{loop}_oos.json")},
+            ],
+        }
 
     # ── test ──────────────────────────────────────────────────────────────────
 
@@ -299,7 +379,11 @@ class QuantAlphaPlugin(ResearchPlugin):
     def analyze_node(self, state: dict) -> dict:
         loop    = state.get("loop_index", 0)
         plan    = state.get("implementation_plan", {})
-        metrics = state.get("test_metrics", {})
+        raw_metrics = state.get("test_metrics", {})
+        # Support IS/OOS nested format (real mode) and flat format (mock mode)
+        is_metrics_  = raw_metrics.get("is",  raw_metrics)
+        oos_metrics_ = raw_metrics.get("oos", raw_metrics)
+        metrics = oos_metrics_   # analyze against OOS (primary evaluation)
         logger.info("[QuantAlpha] analyze  loop=%d", loop)
 
         # Propagate TERMINATE set by implement on reject
@@ -315,11 +399,15 @@ class QuantAlphaPlugin(ResearchPlugin):
             strategy_name        = plan.get("strategy_name", "?"),
             params               = json.dumps({k: v for k, v in plan.items()
                                                if k != "target_win_rate"}),
-            win_rate             = metrics.get("win_rate", 0),
-            alpha_ratio          = metrics.get("alpha_ratio", 0),
-            max_drawdown         = metrics.get("max_drawdown", 0),
-            profit_factor        = metrics.get("profit_factor", 0.0),
-            n_trades             = metrics.get("n_trades", 0),
+            is_win_rate          = is_metrics_.get("win_rate",      0),
+            is_profit_factor     = is_metrics_.get("profit_factor", 0),
+            is_max_drawdown      = is_metrics_.get("max_drawdown",  0),
+            is_n_trades          = is_metrics_.get("n_trades",      0),
+            win_rate             = metrics.get("win_rate",         0),
+            alpha_ratio          = metrics.get("alpha_ratio",      0),
+            max_drawdown         = metrics.get("max_drawdown",     0),
+            profit_factor        = metrics.get("profit_factor",    0.0),
+            n_trades             = metrics.get("n_trades",         0),
             target_win_rate      = plan.get("target_win_rate", _PASS_WIN_RATE),
             target_profit_factor = target_pf,
             loop_index           = loop,
@@ -362,23 +450,46 @@ class QuantAlphaPlugin(ResearchPlugin):
         return {"last_result": result, "last_reason": reason}
 
     def _rule_based_analyze(self, loop, plan, metrics):
-        win_rate      = metrics.get("win_rate", 0)
-        alpha_ratio   = metrics.get("alpha_ratio", 0)
-        max_dd        = metrics.get("max_drawdown", 1)
-        profit_factor = metrics.get("profit_factor", 0.0)
+        # Support IS/OOS nested format or flat format
+        if "oos" in metrics:
+            oos  = metrics["oos"]
+            is_m = metrics.get("is", {})
+            # Overfitting check: OOS should be >= IS * 80%
+            is_pf  = is_m.get("profit_factor", 0)
+            oos_pf = oos.get("profit_factor", 0)
+            is_wr  = is_m.get("win_rate", 0)
+            oos_wr = oos.get("win_rate", 0)
+            if is_pf > 0 and oos_pf < is_pf * 0.8:
+                return "FAIL", (
+                    f"Overfitting: OOS pf={oos_pf:.4f} < IS pf={is_pf:.4f} × 0.8"
+                )
+            if is_wr > 0 and oos_wr < is_wr * 0.8:
+                return "FAIL", (
+                    f"Overfitting: OOS wr={oos_wr:.4f} < IS wr={is_wr:.4f} × 0.8"
+                )
+            m = oos
+        else:
+            m = metrics
+
+        win_rate      = m.get("win_rate", 0)
+        alpha_ratio   = m.get("alpha_ratio")   # None in real mode
+        max_dd        = m.get("max_drawdown", 1)
+        profit_factor = m.get("profit_factor", 0.0)
         target_wr     = plan.get("target_win_rate", _PASS_WIN_RATE)
 
-        if (win_rate >= target_wr and alpha_ratio >= _PASS_ALPHA
+        alpha_ok = (alpha_ratio is None) or (alpha_ratio >= _PASS_ALPHA)
+
+        if (win_rate >= target_wr and alpha_ok
                 and max_dd <= _PASS_MAX_DD and profit_factor >= _PASS_PROFIT_FACTOR):
             return "PASS", (
                 f"win_rate={win_rate:.4f} ≥ {target_wr}  "
-                f"alpha={alpha_ratio:.4f} ≥ 1.0  "
                 f"drawdown={max_dd:.4f} ≤ 0.20  "
                 f"profit_factor={profit_factor:.4f} ≥ {_PASS_PROFIT_FACTOR}"
             )
+
         fails = []
         if win_rate      < target_wr:           fails.append(f"win_rate={win_rate:.4f} < {target_wr}")
-        if alpha_ratio   < _PASS_ALPHA:         fails.append(f"alpha={alpha_ratio:.4f} < 1.0")
+        if not alpha_ok:                         fails.append(f"alpha={alpha_ratio:.4f} < 1.0")
         if max_dd        > _PASS_MAX_DD:        fails.append(f"drawdown={max_dd:.4f} > 0.20")
         if profit_factor < _PASS_PROFIT_FACTOR: fails.append(f"profit_factor={profit_factor:.4f} < {_PASS_PROFIT_FACTOR}")
         return "FAIL", "Failed: " + "; ".join(fails)

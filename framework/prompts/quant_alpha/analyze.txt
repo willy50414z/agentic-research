@@ -14,7 +14,15 @@
 參數    ：{params}
 Loop    ：{loop_index}
 
-回測指標（當前為聚合值；Freqtrade 整合後將拆分為 IS/OOS 兩組）：
+回測指標（IS = 樣本內，OOS = 樣本外）：
+
+IS（樣本內）：
+  win_rate     ：{is_win_rate}
+  max_drawdown ：{is_max_drawdown}
+  profit_factor：{is_profit_factor}
+  n_trades     ：{is_n_trades}
+
+OOS（樣本外，主要評估依據）：
   win_rate     ：{win_rate}
   alpha_ratio  ：{alpha_ratio}   （策略報酬 / 買進持有；>1.0 代表超越大盤）
   max_drawdown ：{max_drawdown}

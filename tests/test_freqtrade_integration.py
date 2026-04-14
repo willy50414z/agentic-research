@@ -258,3 +258,38 @@ class TestBacktestRealMode:
         from projects.quant_alpha.backtest import _to_freqtrade_timerange
         period = {"start": "2023-01-01", "end": "2023-12-31"}
         assert _to_freqtrade_timerange(period) == "20230101-20231231"
+
+
+# ── Task 6: real implement_node ───────────────────────────────────────────────
+
+class TestRealImplementNode:
+    def test_real_implement_runs_is_oos(self, tmp_path, monkeypatch):
+        """Real implement_node calls run_backtest_is_oos and write_loop_artifacts."""
+        import projects.quant_alpha.plugin as plugin_mod
+
+        # Override BACKTEST_MODE and ARTIFACTS_DIR at the module level for this test
+        monkeypatch.setattr(plugin_mod, "BACKTEST_MODE", "real")
+        monkeypatch.setattr(plugin_mod, "ARTIFACTS_DIR", tmp_path)
+
+        fake_is  = {"win_rate": 0.6, "profit_factor": 1.5, "max_drawdown": 0.12,
+                    "profit_total_pct": 25.0, "n_trades": 45, "trades": []}
+        fake_oos = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
+                    "profit_total_pct": 20.0, "n_trades": 38, "trades": []}
+
+        with patch("projects.quant_alpha.plugin.run_backtest_is_oos",
+                   return_value=(fake_is, fake_oos)) as mock_bt, \
+             patch("projects.quant_alpha.plugin.write_loop_artifacts"), \
+             patch("projects.quant_alpha.plugin._append_execution_log"):
+            plugin = plugin_mod.QuantAlphaPlugin()
+            state = {
+                "loop_index": 0,
+                "implementation_plan": SAMPLE_PLAN,
+                "spec": SAMPLE_SPEC,
+                "artifacts": [],
+                "needs_human_approval": False,
+            }
+            result = plugin.implement_node(state)
+
+        assert result["is_metrics"]["win_rate"] == pytest.approx(0.6)
+        assert result["oos_metrics"]["win_rate"] == pytest.approx(0.55)
+        assert mock_bt.call_count == 1
