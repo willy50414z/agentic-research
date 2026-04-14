@@ -80,9 +80,15 @@ class StrategyName(IStrategy):
   "strategy_file": "{STRATEGY_DIR}/{{strategy_name}}.py",
   "timeframe": "來自規格",
   "stoploss": 停損數值（負數浮點數）,
+  "run_mode": "backtest",
   "parameters": {{
     "各指標參數預設值": "值"
   }},
   "_reason": "本輪與上一輪的差異，或首輪說明策略依據"
 }}
 ```
+
+注意 `run_mode`：
+- `"backtest"` — 標準 IS/OOS 雙組回測（預設，也是此 TODO A 階段唯一支援的模式）
+- `"hyperopt"` — 後續 TODO B 支援
+- `"cross_test"` — 後續 TODO B 支援

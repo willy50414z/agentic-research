@@ -324,3 +324,44 @@ class TestFreqtradeCli:
             ])
 
         mock_bt.assert_called_once()
+
+
+# ── Task 10: freqtrade_real integration tests （預設跳過）────────────────────
+
+_HAS_FREQTRADE = False
+try:
+    import subprocess as _sp
+    _HAS_FREQTRADE = _sp.run(
+        ["freqtrade", "--version"], capture_output=True, timeout=5
+    ).returncode == 0
+except Exception:
+    pass
+
+pytestmark_freqtrade = pytest.mark.skipif(
+    not _HAS_FREQTRADE,
+    reason="freqtrade CLI not installed — skipping freqtrade_real tests",
+)
+
+
+@pytest.mark.freqtrade_real
+class TestFreqtradeRealIntegration:
+    def test_config_generator_produces_valid_json(self, tmp_path):
+        """Smoke test: generated config.json passes json.loads."""
+        from projects.quant_alpha.config_generator import generate_config
+        path = generate_config(SAMPLE_SPEC, tmp_path)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["exchange"]["name"] == "binance"
+
+    def test_result_parser_with_fixture_zip(self, tmp_path):
+        """Smoke test: result_parser handles the fixture zip correctly."""
+        from projects.quant_alpha.result_parser import parse_backtest_zip
+        zip_path = tmp_path / "fixture.zip"
+        zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
+        metrics = parse_backtest_zip(zip_path, "TestRsiStrategy")
+        assert 0 <= metrics["win_rate"] <= 1
+        assert metrics["n_trades"] >= 0
+
+    @pytest.mark.freqtrade_real
+    def test_freqtrade_cli_backtest_real(self, tmp_path):
+        """E2E: requires real Freqtrade install and downloaded data."""
+        pytest.skip("Requires manual setup: freqtrade data + strategy file")

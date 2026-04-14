@@ -11,6 +11,10 @@ def pytest_configure(config):
         "markers",
         "integration: mark test as requiring a live PostgreSQL DATABASE_URL",
     )
+    config.addinivalue_line(
+        "markers",
+        "freqtrade_real: requires a real Freqtrade CLI installation; skipped by default",
+    )
 
 
 def _mock_psycopg():
