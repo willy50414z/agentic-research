@@ -110,3 +110,134 @@ class TestCaptureLogs:
 
         assert count == 0
         assert not Path(output_path).exists()
+
+
+class TestPollingLoop:
+    """測試 poll_until.py 的主 polling 邏輯。"""
+
+    def _run_poll_until(self, argv: list[str], env: dict = None) -> dict:
+        """執行 poll_until.py 並解析 stdout JSON。"""
+        import os
+        combined_env = {**os.environ, **(env or {})}
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "poll_until.py")] + argv,
+            capture_output=True, text=True, env=combined_env,
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        return json.loads(result.stdout.strip())
+
+    def test_returns_reached_when_column_matches(self, tmp_path):
+        """已在目標 column 時，立即回傳 status=reached。"""
+        from poll_until import _main_logic
+
+        call_count = {"n": 0}
+
+        def fake_get_column(card_id, url, token, board_id):
+            call_count["n"] += 1
+            return "Verify"
+
+        out = _main_logic(
+            card_id="c1",
+            target_columns={"Verify", "Planning"},
+            timeout=30,
+            interval_early=5,
+            interval_late=10,
+            early_window=15,
+            log_source="",
+            log_grep=".",
+            log_output="",
+            planka_url="http://mock",
+            token="t",
+            board_id="b",
+            _get_column_fn=fake_get_column,
+            _sleep_fn=lambda _: None,
+            _time_fn=lambda: 0.0,
+        )
+
+        assert out["status"] == "reached"
+        assert out["column"] == "Verify"
+        assert call_count["n"] == 1
+
+    def test_returns_timeout_when_column_never_matches(self, tmp_path):
+        """column 從不匹配時，到達 timeout 後回傳 status=timeout。"""
+        from poll_until import _main_logic
+
+        tick = {"t": 0.0}
+
+        def fake_time():
+            return tick["t"]
+
+        def fake_sleep(seconds):
+            tick["t"] += seconds
+
+        def fake_get_column(*_):
+            return "Planning"  # 永遠不是目標
+
+        out = _main_logic(
+            card_id="c1",
+            target_columns={"Verify"},
+            timeout=60,
+            interval_early=30,
+            interval_late=60,
+            early_window=30,
+            log_source="",
+            log_grep=".",
+            log_output="",
+            planka_url="http://mock",
+            token="t",
+            board_id="b",
+            _get_column_fn=fake_get_column,
+            _sleep_fn=fake_sleep,
+            _time_fn=fake_time,
+        )
+
+        assert out["status"] == "timeout"
+        assert out["column"] == "Planning"
+
+    def test_adaptive_interval_switches_after_early_window(self, tmp_path):
+        """前段用 interval_early，超過 early_window 後用 interval_late。"""
+        from poll_until import _main_logic
+
+        tick = {"t": 0.0}
+        sleep_calls = []
+
+        def fake_time():
+            return tick["t"]
+
+        def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+            tick["t"] += seconds  # advance time
+
+        call_count = {"n": 0}
+
+        def fake_get_column(*_):
+            call_count["n"] += 1
+            # 前兩次 polling 仍在 early_window（0s, 30s）
+            # 第三次已超過 early_window（60s > 50s）
+            # 第四次才到目標
+            if call_count["n"] >= 4:
+                return "Verify"
+            return "Spec Pending Review"
+
+        _main_logic(
+            card_id="c1",
+            target_columns={"Verify"},
+            timeout=300,
+            interval_early=30,
+            interval_late=120,
+            early_window=50,   # 50 秒後切換到 late interval
+            log_source="",
+            log_grep=".",
+            log_output="",
+            planka_url="http://mock",
+            token="t",
+            board_id="b",
+            _get_column_fn=fake_get_column,
+            _sleep_fn=fake_sleep,
+            _time_fn=fake_time,
+        )
+
+        # 前兩次 sleep 應為 interval_early=30，之後應為 interval_late=120
+        assert sleep_calls[0] == 30
+        assert sleep_calls[1] == 30
+        assert sleep_calls[2] == 120
