@@ -63,3 +63,70 @@ class TestExtractMetricsMock:
         assert result["loops_found"] == 3
         # 最新一筆 loop_2 的 win_rate 應為 0.60
         assert result.get("loop_2", {}).get("win_rate") == pytest.approx(0.60)
+
+
+class TestExtractMetricsReal:
+    def _make_real_fixtures(self, tmp_path, is_pf=1.89, oos_pf=1.34, is_wr=0.62, oos_wr=0.58):
+        llm_io = tmp_path / ".llm_io" / "0_20260423_120000"
+        llm_io.mkdir(parents=True)
+        is_data  = {"win_rate": is_wr,  "profit_factor": is_pf,  "max_drawdown": 0.11, "n_trades": 52}
+        oos_data = {"win_rate": oos_wr, "profit_factor": oos_pf, "max_drawdown": 0.14, "n_trades": 23}
+        (llm_io / "loop_0_is.json").write_text(json.dumps(is_data),  encoding="utf-8")
+        (llm_io / "loop_0_oos.json").write_text(json.dumps(oos_data), encoding="utf-8")
+        return tmp_path
+
+    def test_real_returns_is_oos(self, tmp_path):
+        """real 模式：回傳 IS 和 OOS 兩組指標。"""
+        from extract_metrics import extract_real_metrics
+
+        artifacts_dir = self._make_real_fixtures(tmp_path)
+        result = extract_real_metrics(artifacts_dir)
+
+        assert result["mode"] == "real"
+        loop_data = result["loop_0"]
+        assert loop_data["IS"]["profit_factor"] == pytest.approx(1.89)
+        assert loop_data["OOS"]["profit_factor"] == pytest.approx(1.34)
+        assert result["overfitting_warnings"] == []
+
+    def test_real_overfitting_warning_when_oos_too_low(self, tmp_path):
+        """real 模式：OOS pf < IS * 0.6 時回傳 overfitting_warnings。"""
+        from extract_metrics import extract_real_metrics
+
+        # IS pf=2.0, OOS pf=0.5 → 0.5 < 2.0*0.6=1.2 → 警告
+        artifacts_dir = self._make_real_fixtures(tmp_path, is_pf=2.0, oos_pf=0.5)
+        result = extract_real_metrics(artifacts_dir)
+
+        assert len(result["overfitting_warnings"]) >= 1
+        assert "profit_factor" in result["overfitting_warnings"][0]
+
+    def test_real_missing_files_returns_error(self, tmp_path):
+        """real 模式：找不到 is.json 時回傳 error dict，不 raise。"""
+        from extract_metrics import extract_real_metrics
+
+        result = extract_real_metrics(tmp_path)
+        assert "error" in result
+
+    def test_cli_writes_output_file(self, tmp_path):
+        """CLI：執行後應寫入 output JSON 檔案。"""
+        import subprocess
+
+        artifact = {"is_result": {"win_rate": 0.6, "profit_factor": 1.2,
+                                   "max_drawdown": 0.1, "n_trades": 30}}
+        (tmp_path / "loop_0_train.json").write_text(json.dumps(artifact), encoding="utf-8")
+        output = tmp_path / "out" / "metrics.json"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "extract_metrics.py"),
+                "--mode", "mock",
+                "--artifacts-dir", str(tmp_path),
+                "--output", str(output),
+            ],
+            capture_output=True, text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert output.exists()
+        data = json.loads(output.read_text(encoding="utf-8"))
+        assert data["mode"] == "mock"
