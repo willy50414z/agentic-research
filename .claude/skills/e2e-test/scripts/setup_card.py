@@ -2,7 +2,7 @@
 
 Usage:
     python setup_card.py \
-        --spec-path tests/README.md \
+        --spec-path tests/spec.md \
         --run-id 20260423-143000
 
 Outputs JSON to stdout:
@@ -59,7 +59,7 @@ def setup_card(
         card_resp = httpx.post(
             f"{planka_url}/api/lists/{planning_id}/cards",
             headers=headers,
-            json={"name": f"[E2E Test] Turtle Trading {run_id}", "position": 65535},
+            json={"name": f"[E2E Test] Turtle Trading {run_id}", "position": 65535, "type": "story"},
             timeout=10,
         )
         card_resp.raise_for_status()
@@ -79,6 +79,7 @@ def setup_card(
             f"{planka_url}/api/cards/{card_id}/attachments",
             headers=headers,
             files={"file": ("spec.md", spec_content, "text/markdown")},
+            data={"type": "file", "name": "spec.md"},
             timeout=30,
         )
         attach_resp.raise_for_status()

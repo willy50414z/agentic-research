@@ -45,7 +45,7 @@ description: >
 5. 執行 `setup_card.py`：
    ```bash
    python .ai/skills/e2e-test/scripts/setup_card.py \
-     --spec-path tests/README.md \
+     --spec-path tests/spec.md \
      --run-id {run_id}
    ```
    解析 JSON 輸出，取得 `card_id`、`thread_id`。
