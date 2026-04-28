@@ -90,9 +90,19 @@ class TestConfigGenerator:
         cfg = json.loads(path.read_text(encoding="utf-8"))
         assert cfg["exchange"]["name"] == "binance"
         assert cfg["exchange"]["pair_whitelist"] == ["BTC/USDT"]
-        assert cfg["timeframe"] == "1h"
+        assert cfg["timeframe"] == "1h"  # already lowercase, no change
+        assert "entry_pricing" in cfg
+        assert "exit_pricing" in cfg
+
+    def test_generate_config_timeframe_uppercased(self, tmp_path):
+        from projects.quant_alpha.config_generator import generate_config
+        spec = {**SAMPLE_SPEC, "trading_scope": {**SAMPLE_SPEC["trading_scope"], "timeframe": "1D"}}
+        path = generate_config(spec, tmp_path)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["timeframe"] == "1d"
         assert cfg["stake_currency"] == "USDT"
         assert abs(cfg["fee"] - 0.001) < 1e-9
+        assert cfg["pairlists"] == [{"method": "StaticPairList"}]
 
     def test_generate_config_missing_pair_raises(self, tmp_path):
         from projects.quant_alpha.config_generator import generate_config

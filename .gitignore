@@ -8,3 +8,4 @@
 .llm_io/
 .env
 /artifacts/
+/data/tool-runtime/

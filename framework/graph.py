@@ -314,12 +314,20 @@ def _fallback_summary(rows: list[dict], n: int, goal: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _analyze_router(state: ResearchState) -> str:
-    result = state.get("last_result", "UNKNOWN")
+    result     = state.get("last_result", "UNKNOWN")
+    project_id = state.get("project_id", "?")
+    attempt    = state.get("attempt_index", 0)
     if result == "PASS":
-        return "pass"
-    if result == "TERMINATE":
-        return "terminate"
-    return "fail"
+        branch = "pass"
+    elif result == "TERMINATE":
+        branch = "terminate"
+    else:
+        branch = "fail"
+    logger.info(
+        "[ROUTE] analyze → %-10s project='%s'  last_result=%s  attempt=%s",
+        branch, project_id, result, attempt,
+    )
+    return branch
 
 
 # ---------------------------------------------------------------------------
@@ -388,15 +396,26 @@ def _make_record_terminate_metrics_node(db_url: str):
 
 def _make_node_logger(node_name: str, node_fn, sink):
     """
-    Wrap a plugin node function to post a Planka comment after each execution.
-    If sink is None, returns node_fn unchanged (no-op).
+    Wrap a plugin node function to log entry/exit and post a Planka comment.
+    Logger output is always emitted; Planka comment is skipped when sink is None.
     """
-    if sink is None:
-        return node_fn
-
     def wrapped(state: dict) -> dict:
+        project_id = state.get("project_id", "?")
+        loop       = state.get("loop_index", 0)
+        attempt    = state.get("attempt_index", 0)
+        logger.info(
+            "[NODE ENTER] %-24s project='%s'  loop=%s  attempt=%s",
+            node_name.upper(), project_id, loop, attempt,
+        )
         result = node_fn(state)
-        _post_node_comment(node_name, state, result or {}, sink)
+        merged = {**state, **(result or {})}
+        last_result = merged.get("last_result", "")
+        logger.info(
+            "[NODE EXIT]  %-24s project='%s'  loop=%s  last_result=%s",
+            node_name.upper(), project_id, loop, last_result or "-",
+        )
+        if sink is not None:
+            _post_node_comment(node_name, state, result or {}, sink)
         return result
 
     wrapped.__name__ = node_fn.__name__ if hasattr(node_fn, "__name__") else node_name

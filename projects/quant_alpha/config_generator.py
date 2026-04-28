@@ -9,15 +9,26 @@ from pathlib import Path
 def generate_config(spec: dict, work_dir: Path) -> Path:
     """
     Generate Freqtrade config.json from spec fields and write to work_dir.
-    Raises KeyError if required spec fields are missing.
+    Supports both trading_scope (new) and universe (legacy) key names.
     Returns path to the written config.json.
     """
-    scope     = spec["trading_scope"]
+    scope = spec.get("trading_scope") or spec.get("universe") or {}
+    if not scope:
+        raise KeyError(
+            "spec is missing 'trading_scope' (and legacy 'universe') — "
+            "ensure parse_spec_md ran against a reviewed spec with trading range section."
+        )
     execution = spec.get("execution", {})
 
-    pair      = scope["pair"]
-    timeframe = scope["timeframe"]
-    exchange  = scope["exchange"]
+    pair      = scope.get("pair") or scope.get("instruments", "")
+    timeframe = scope.get("timeframe", "")
+    exchange  = scope.get("exchange", "")
+    if not pair:
+        raise KeyError("spec trading_scope is missing 'pair' — check reviewed spec content.")
+    if not timeframe:
+        raise KeyError("spec trading_scope is missing 'timeframe'.")
+    if not exchange:
+        raise KeyError("spec trading_scope is missing 'exchange'.")
 
     # Parse fee: "0.10%" → 0.001, or float 0.001 → 0.001
     fee_raw = execution.get("fee", "0.1%")
@@ -37,18 +48,29 @@ def generate_config(spec: dict, work_dir: Path) -> Path:
         "stake_amount": "unlimited",
         "tradable_balance_ratio": 1.0,
         "fiat_display_currency": "USD",
-        "timeframe": timeframe,
+        "timeframe": timeframe.lower(),
         "dry_run": True,
         "dry_run_wallet": 1000,
         "trading_mode": "spot",
         "margin_mode": "",
         "exchange": {
-            "name": exchange,
+            "name": exchange.lower(),
             "key": "",
             "secret": "",
             "ccxt_config": {},
             "ccxt_async_config": {},
             "pair_whitelist": [pair],
+        },
+        "pairlists": [{"method": "StaticPairList"}],
+        "entry_pricing": {
+            "price_side": "same",
+            "use_order_book": False,
+            "order_book_top": 1,
+        },
+        "exit_pricing": {
+            "price_side": "same",
+            "use_order_book": False,
+            "order_book_top": 1,
         },
         "fee": fee_pct,
         "internals": {},

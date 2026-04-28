@@ -68,6 +68,7 @@ class SpecReviewState(TypedDict):
     questions: list             # 最終需要用戶回答的問題清單
     planka_comments: list       # 從 Planka 抓取的討論串內容
     has_pending_qa: bool        # 是否正在等待用戶回覆問題
+    spec_fields: dict           # LLM 產出的結構化執行欄位（來自 spec_fields.json）
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +97,7 @@ def _spec_review_init(state: dict, config: RunnableConfig) -> dict:
     project_id = state.get("project_id", "")
     cfg = config.get("configurable", {})
     sink = cfg.get("planka_sink")
+    logger.info("[NODE ENTER] SPEC_REVIEW_INIT   project='%s'  spec_path=%s", project_id, state.get("spec_path", ""))
 
     llm_chain_str = (os.getenv("LLM_CHAIN") or "").strip()
     participants = [p.strip() for p in llm_chain_str.split(",") if p.strip()]
@@ -164,6 +166,7 @@ def _spec_review_init(state: dict, config: RunnableConfig) -> dict:
         "status": "in_progress",
         "questions": [],
         "has_pending_qa": has_pending_qa,
+        "spec_fields": {},
     }
 
 
@@ -205,6 +208,11 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
     """
     participants = state.get("participants", [])
     current_round = state.get("current_round", 0)
+    logger.info(
+        "[NODE ENTER] SPEC_REVIEW_ROUND  project='%s'  round=%d/%d  has_pending_qa=%s",
+        state.get("project_id", "?"), current_round + 1, state.get("total_rounds", 1),
+        state.get("has_pending_qa", False),
+    )
     total_rounds = state.get("total_rounds", 1)
     spec_path = state.get("spec_path", "")
     work_dir = str(Path(spec_path).parent)
@@ -337,6 +345,11 @@ def _spec_review_round(state: dict, config: RunnableConfig) -> dict:
             )
         else:
             updates["status"] = "in_progress"
+            if result.spec_fields:
+                updates["spec_fields"] = result.spec_fields
+                logger.info("spec_review_round: spec_fields stored in state (%d keys).", len(result.spec_fields))
+            else:
+                logger.warning("spec_review_round: spec_fields.json missing from PASS result (role=%s).", role)
             logger.info("spec_review_round: %s role completed (pass).", role)
             _post_spec_comment(
                 sink, project_id,
@@ -362,6 +375,10 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
     from framework.db.queries import create_project, get_project
 
     project_id = state.get("project_id", "")
+    logger.info(
+        "[NODE ENTER] SPEC_FINALIZE      project='%s'  status=%s  questions=%d",
+        project_id, state.get("status", "?"), len(state.get("questions", [])),
+    )
     card_id    = state.get("card_id", "")
     status     = state.get("status", "abort")
     questions  = state.get("questions", [])
@@ -395,14 +412,20 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
 
     # status == "in_progress" after synthesizer completed successfully (pass)
     logger.info("spec_finalize: pass — finalising project '%s'.", project_id)
-    try:
-        parsed = parse_spec_md(spec_md)
-    except Exception as e:
-        logger.exception("spec_finalize: parse_spec_md failed: %s", e)
-        if sink:
-            sink.post_comment(project_id, f"**Spec 解析失敗**\n\n{e}")
-        _move("Planning")
-        return {}
+
+    # Build spec dict: LLM-produced spec_fields.json is the primary source of structured
+    # fields (trading_scope, data, execution, performance).  parse_spec_md provides the
+    # fallback minimal structure (plugin, hypothesis, raw_md) when spec_fields is absent.
+    minimal = parse_spec_md(spec_md)
+    spec_fields = state.get("spec_fields") or {}
+    if not spec_fields:
+        logger.warning(
+            "spec_finalize: spec_fields.json not found for project '%s' — "
+            "config_generator / backtest will fail if BACKTEST_MODE=real. "
+            "Re-run spec review to regenerate.",
+            project_id,
+        )
+    parsed = {**minimal, **spec_fields}
 
     try:
         existing = get_project(project_id, db_url)
@@ -458,13 +481,21 @@ def _spec_finalize(state: dict, config: RunnableConfig) -> dict:
 
 def _route_review(state: dict) -> str:
     """Continue looping until the last round is done, then finalize."""
-    if state.get("status") in ("abort", "need_update"):
-        return "spec_finalize"
-    current = state.get("current_round", 0)
-    total   = state.get("total_rounds", 1)
-    if current < total:
-        return "spec_review_round"
-    return "spec_finalize"
+    project_id = state.get("project_id", "?")
+    status     = state.get("status", "")
+    current    = state.get("current_round", 0)
+    total      = state.get("total_rounds", 1)
+    if status in ("abort", "need_update"):
+        next_node = "spec_finalize"
+    elif current < total:
+        next_node = "spec_review_round"
+    else:
+        next_node = "spec_finalize"
+    logger.info(
+        "[ROUTE] spec_review → %-18s project='%s'  round=%d/%d  status=%s",
+        next_node, project_id, current, total, status,
+    )
+    return next_node
 
 
 # ---------------------------------------------------------------------------

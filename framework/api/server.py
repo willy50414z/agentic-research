@@ -20,7 +20,7 @@ End conditions after graph completes:
   last_result == "TERMINATE" → card moves to Review + TERMINATE reason posted as comment
 
 Scheduler:
-  Every 60 s: clear review_in_progress flags older than 5 minutes (crash recovery).
+  Every 60 s: clear review_in_progress flags older than REVIEW_STALE_TIMEOUT seconds (default 2400, crash recovery).
 """
 
 import asyncio
@@ -34,6 +34,7 @@ from pathlib import Path
 import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, BackgroundTasks
+from graphify.watch import watch
 from langgraph.types import Command
 
 from framework.db.queries import create_project, get_project
@@ -78,6 +79,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 PLANKA_URL = os.getenv("PLANKA_API_URL", "")
 PLANKA_TOKEN = os.getenv("PLANKA_TOKEN", "")
 PLANKA_BOARD_ID = os.getenv("PLANKA_BOARD_ID", "")
+
+# Must be >= run_once timeout (default 1800s). CLI agents like Claude can take 10-20 min.
+_REVIEW_STALE_TIMEOUT: int = int(os.getenv("REVIEW_STALE_TIMEOUT", "2400"))
 
 # Planka column names
 _COL_PLANNING      = "Planning"
@@ -305,10 +309,11 @@ def _run_spec_review_bg(
     # --- 1. Idempotency ---
     logger.info("[spec-review] step 1/6 — idempotency check  project_id=%s", project_id)
     existing = get_project(project_id, DATABASE_URL)
+    # 近5分鐘是不是執行過，可能在執行中
     if existing and (existing.get("config") or {}).get("review_in_progress"):
         started_at = (existing.get("config") or {}).get("review_started_at") or 0
         age_seconds = time.time() - started_at
-        if age_seconds < 300:
+        if age_seconds < _REVIEW_STALE_TIMEOUT:
             logger.warning(
                 "[spec-review] SKIP  review already in progress for '%s' (started %.0fs ago).",
                 project_id, age_seconds,
@@ -501,11 +506,12 @@ async def planka_webhook(request: Request, background_tasks: BackgroundTasks):
       Failed              → resume: action=terminate
     """
     payload = await request.json()
-    # logger.info("Planka webhook raw payload: %s", payload)
+    event = payload.get("event", "")
+    logger.info("[WEBHOOK] received event=%s", event)
 
     # Only process cardUpdate events (card moved to a column)
-    event = payload.get("event", "")
     if event != "cardUpdate":
+        logger.debug("[WEBHOOK] ignored event=%s", event)
         return {"status": "ignored", "event": event}
 
     data = payload.get("data") or {}
@@ -861,7 +867,7 @@ async def _scan_stalled_reviews() -> None:
         return
     try:
         from framework.db.connection import get_connection
-        stale_cutoff = time.time() - 300  # 5 minutes
+        stale_cutoff = time.time() - _REVIEW_STALE_TIMEOUT
         with get_connection(DATABASE_URL) as conn:
             with conn.cursor() as cur:
                 cur.execute(

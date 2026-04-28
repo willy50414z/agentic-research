@@ -39,8 +39,19 @@ def run_backtest_is_oos(
 
     config_path = generate_config(spec, work_dir)
 
-    is_range  = _to_freqtrade_timerange(spec["data"]["train_period"])
-    oos_range = _to_freqtrade_timerange(spec["data"]["test_period"])
+    data = spec.get("data") or {}
+    universe = spec.get("universe") or {}
+    # Fallback: build period dicts from legacy universe flat date strings
+    train_period = data.get("train_period") or {
+        "start": universe.get("train_start", ""),
+        "end":   universe.get("train_end", ""),
+    }
+    test_period = data.get("test_period") or {
+        "start": universe.get("test_start", ""),
+        "end":   universe.get("test_end", ""),
+    }
+    is_range  = _to_freqtrade_timerange(train_period)
+    oos_range = _to_freqtrade_timerange(test_period)
 
     is_zip = run_freqtrade_backtest(
         strategy_name=strategy_name,

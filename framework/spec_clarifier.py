@@ -16,6 +16,7 @@ Status detection:
   neither present                → treated as protocol violation (needs_user_input=True)
 """
 
+import json
 import logging
 import os
 import re
@@ -38,6 +39,7 @@ class SpecAgentResult:
     enhanced_spec_md: str       # LLM-rewritten spec.md (metadata block stripped)
     domain: str
     agent_notes: str
+    spec_fields: dict = field(default_factory=dict)  # parsed from spec_fields.json written by LLM
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +163,19 @@ def run_spec_agent(
 
     pass_file = Path(work_dir) / "status_pass.txt"
     need_update_file = Path(work_dir) / "status_need_update.txt"
+    spec_fields_file = Path(work_dir) / "spec_fields.json"
+
+    def _load_spec_fields() -> dict:
+        if not spec_fields_file.exists():
+            logger.warning("run_spec_agent [%s] spec_fields.json not found in '%s'", role, work_dir)
+            return {}
+        try:
+            fields = json.loads(spec_fields_file.read_text(encoding="utf-8"))
+            logger.info("run_spec_agent [%s] spec_fields.json loaded OK", role)
+            return fields
+        except Exception as e:
+            logger.warning("run_spec_agent [%s] spec_fields.json parse error: %s", role, e)
+            return {}
 
     if pass_file.exists():
         logger.info("run_spec_agent [%s] status=PASS (status_pass.txt found in '%s')", role, work_dir)
@@ -172,6 +187,7 @@ def run_spec_agent(
             enhanced_spec_md=enhanced_spec_md,
             domain=domain,
             agent_notes=agent_notes,
+            spec_fields=_load_spec_fields(),
         )
 
     if need_update_file.exists():
@@ -218,105 +234,29 @@ def run_spec_agent(
 
 def parse_spec_md(spec_md: str) -> dict:
     """
-    Extract structured fields from a completed spec.md.
+    Minimal spec parser: extracts only the plugin name (deterministic regex) and preserves raw_md.
 
-    Returns a dict suitable for storing in projects.config["spec"] and
-    passing as ResearchState["spec"].
-
-    Parsed fields:
-      plugin, hypothesis, domain,
-      performance: {win_rate, max_drawdown, alpha_ratio, is_profit_factor, oos_profit_factor},
-      universe: {instruments, exchange, timeframe, train_start, train_end, test_start, test_end},
-      entry_signal, exit_signal, notes
+    All structured fields (trading_scope, data, execution, performance, …) must be
+    extracted by extract_spec_fields_with_llm() so that language-agnostic LLM judgment
+    is used instead of fragile regex.  This function is kept for backward compat and
+    as a fallback when no LLM is available.
     """
-    def _section(header: str) -> str:
-        pattern = rf"## {re.escape(header)}\s*\n(.*?)(?=\n## |\Z)"
-        m = re.search(pattern, spec_md, re.DOTALL | re.IGNORECASE)
-        return m.group(1).strip() if m else ""
-
-    def _float(text: str, patterns: list[str]) -> float | None:
-        for p in patterns:
-            m = re.search(p, text, re.IGNORECASE)
-            if m:
-                try:
-                    return float(m.group(1))
-                except ValueError:
-                    pass
-        return None
-
-    # Plugin
-    plugin_section = _section("Plugin")
-    plugin_m = re.search(r"(\w+)", plugin_section)
+    plugin_m = re.search(r"## Plugin\s*\n\s*(\w+)", spec_md, re.IGNORECASE)
     plugin = plugin_m.group(1).strip() if plugin_m else "quant_alpha"
 
-    # Domain
-    domain = _section("Domain").strip().splitlines()[0] if _section("Domain") else "unknown"
-
-    # Hypothesis
-    hypothesis = _section("Hypothesis") or _section("Research Goal")
-
-    # Performance thresholds
-    perf_text = _section("Performance Thresholds")
-    win_rate = _float(perf_text, [
-        r"win.?rate[:\s]+([0-9.]+)",
-        r"min.?win[:\s]+([0-9.]+)",
-    ])
-    max_drawdown = _float(perf_text, [
-        r"max.?drawdown[:\s]+([0-9.]+)",
-        r"drawdown[:\s]+([0-9.]+)",
-    ])
-    alpha_ratio = _float(perf_text, [
-        r"alpha.?ratio[:\s]+([0-9.]+)",
-        r"min.?alpha[:\s]+([0-9.]+)",
-    ])
-    is_pf = _float(perf_text, [
-        r"in.?sample.?profit.?factor[:\s]+([0-9.]+)",
-        r"min.{0,20}profit.?factor[:\s]+([0-9.]+)",
-    ])
-    oos_pf = _float(perf_text, [
-        r"out.?of.?sample.?profit.?factor[:\s]+([0-9.]+)",
-        r"oos.?profit.?factor[:\s]+([0-9.]+)",
-    ])
-
-    # Universe
-    universe_text = _section("Universe")
-    instruments = re.findall(r"Instruments?[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
-    exchange = re.findall(r"Exchange[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
-    timeframe = re.findall(r"Timeframe[:\s]+([^\n]+)", universe_text, re.IGNORECASE)
-    dates = re.findall(r"\d{4}-\d{2}-\d{2}", universe_text)
-
-    # Signals
-    entry_signal = _section("Entry Signal")
-    exit_signal = _section("Exit Signal")
-
-    # Agent notes
-    agent_notes = _section("Agent Notes")
+    hypothesis_m = re.search(
+        r"## (?:Hypothesis|Research Goal|市場論點|對需求的理解)\s*\n(.*?)(?=\n## |\Z)",
+        spec_md, re.DOTALL | re.IGNORECASE,
+    )
+    hypothesis = hypothesis_m.group(1).strip() if hypothesis_m else ""
 
     return {
-        "plugin": plugin,
-        "domain": domain,
+        "plugin":     plugin,
         "hypothesis": hypothesis,
-        "performance": {
-            "win_rate": win_rate,
-            "max_drawdown": max_drawdown,
-            "alpha_ratio": alpha_ratio,
-            "is_profit_factor": is_pf,
-            "oos_profit_factor": oos_pf,
-        },
-        "universe": {
-            "instruments": instruments[0].strip() if instruments else "",
-            "exchange": exchange[0].strip() if exchange else "",
-            "timeframe": timeframe[0].strip() if timeframe else "",
-            "train_start": dates[0] if len(dates) > 0 else "",
-            "train_end": dates[1] if len(dates) > 1 else "",
-            "test_start": dates[2] if len(dates) > 2 else "",
-            "test_end": dates[3] if len(dates) > 3 else "",
-        },
-        "entry_signal": entry_signal,
-        "exit_signal": exit_signal,
-        "agent_notes": agent_notes,
-        "raw_md": spec_md,
+        "raw_md":     spec_md,
     }
+
+
 
 
 # ---------------------------------------------------------------------------
