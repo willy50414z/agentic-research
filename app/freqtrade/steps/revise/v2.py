@@ -48,6 +48,7 @@ from app.freqtrade.checklist import (
 )
 
 from .._common import ARTIFACTS_DIR, _call_llm as _default_call_llm, _load_prompt
+from ..strategy_snapshot import write_strategy_spec_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -692,7 +693,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             detail="3 checklist generations all failed (UNIMPLEMENTABLE / AMBIGUOUS / schema)",
         )
 
-    # ------ Success path: write audit log, update plan ------
+    # ------ Success path: write audit log, snapshot, update plan ------
     history.final_verdict = "APPROVED"
     _write_audit_log_md(
         history=history, counters=counters, iteration=iteration,
@@ -700,7 +701,30 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
     )
     artifacts.append({"type": "audit", "path": str(audit_log_path)})
 
+    # Strategy spec snapshot: structural data extracted deterministically from
+    # the promoted .py; checklist + intent.md provide narrative + delta.
     plan = dict(state.get("implementation_plan") or {})
+    snapshot_path = ARTIFACTS_DIR / f"v{iteration}_strategy_spec.md"
+    try:
+        prev_py = state.get("implementation_plan", {}).get("strategy_file")
+        intent_text = intent_path.read_text(encoding="utf-8") if intent_path else None
+        write_strategy_spec_snapshot(
+            py_path=promoted_path,
+            prev_py_path=prev_py,
+            checklist=checklist,
+            intent_md=intent_text,
+            output_path=snapshot_path,
+        )
+        artifacts.append({"type": "strategy_spec", "path": str(snapshot_path)})
+    except ValueError as e:
+        # Snapshot caught a post-audit divergence (param item ≠ AST value).
+        # This is intentionally fatal: TERMINATE rather than upload an
+        # incoherent snapshot.
+        return _terminate("SNAPSHOT_DIVERGENCE", detail=str(e))
+    except Exception as e:
+        # Other snapshot failures are non-fatal; log and continue.
+        history.log(f"strategy_spec snapshot failed (non-fatal): {e}")
+
     plan["strategy_file"] = str(promoted_path)
 
     return {

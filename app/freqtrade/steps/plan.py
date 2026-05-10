@@ -1,4 +1,11 @@
-"""plan_step — LLM designs a strategy from spec.raw_md."""
+"""plan_step — LLM designs a strategy from spec.raw_md.
+
+The baseline strategy ``.py`` is written directly to
+``artifacts/strategies/v0/{StrategyName}.py`` (no staging path — baseline does
+not undergo audit). After the LLM produces ``plan_output.json``, plan_step
+also writes ``v0_strategy_spec.md`` from the AST of that ``.py`` (per the
+``per-iteration-strategy-snapshot`` capability).
+"""
 from __future__ import annotations
 
 import logging
@@ -10,6 +17,7 @@ from ._common import (
     _load_prompt,
     _read_json_file,
 )
+from .strategy_snapshot import write_strategy_spec_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +28,8 @@ def plan_step(state: dict) -> dict:
     logger.info("[freqtrade] plan  loop=%d", loop)
 
     output_dir   = str(ARTIFACTS_DIR.resolve())
-    strategy_dir = str((ARTIFACTS_DIR / "strategies").resolve())
+    # Baseline lives in v0/ directly (no staging — baseline isn't audited).
+    strategy_dir = str((ARTIFACTS_DIR / "strategies" / "v0").resolve())
     spec         = state.get("spec") or {}
     spec_md      = spec.get("raw_md", "（spec 未提供）")
     if spec_md == "（spec 未提供）":
@@ -52,10 +61,37 @@ def plan_step(state: dict) -> dict:
     plan.setdefault("strategy_name", "UnknownStrategy")
     plan.setdefault("stoploss",      -0.05)
 
+    # Snapshot v0_strategy_spec.md from the freshly-written .py if present.
+    artifacts: list[dict] = list(state.get("artifacts") or [])
+    py_path = plan.get("strategy_file") or str(
+        Path(strategy_dir) / f"{plan['strategy_name']}.py"
+    )
+    plan["strategy_file"] = py_path  # ensure plan reflects the v0/ path
+    snapshot_path = ARTIFACTS_DIR / "v0_strategy_spec.md"
+    try:
+        if Path(py_path).exists():
+            write_strategy_spec_snapshot(
+                py_path=py_path,
+                prev_py_path=None,
+                checklist=None,
+                intent_md=None,
+                output_path=snapshot_path,
+            )
+            artifacts.append({"type": "strategy_spec", "path": str(snapshot_path)})
+        else:
+            logger.warning(
+                "[freqtrade] plan  strategy_file '%s' not on disk — skipping snapshot",
+                py_path,
+            )
+    except Exception as e:
+        # Snapshot failure is non-fatal; log and continue.
+        logger.warning("[freqtrade] plan  strategy_spec snapshot failed: %s", e)
+
     return {
         "loop_goal":            goal,
         "implementation_plan":  plan,
         "needs_human_approval": False,
         "last_result":          "PLAN_READY",
         "last_reason":          f"Plan: {plan.get('strategy_name', '?')}.",
+        "artifacts":            artifacts,
     }

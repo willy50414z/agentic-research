@@ -53,20 +53,20 @@
 
 ## 4. 每輪獨立 strategy `.py`、staging path、spec 快照
 
-- [ ] 4.1 修改 `plan_step`：把 `.py` 直接寫入 `artifacts/strategies/v0/{StrategyName}.py`（baseline 無 staging），plan.strategy_file 對應更新
-- [ ] 4.2 確認 revise_step subagent 階段寫到 staging（`artifacts/.staging/v{N}/candidate.py`），audit 通過後 promote（task 3.9 涵蓋）
-- [ ] 4.3 在 `app/freqtrade/strategy_extractor.py` 新增 deterministic AST 萃取模組：`extract_class_name(py)`、`extract_timeframe(py)`、`extract_stoploss(py)`、`extract_minimal_roi(py)`、`extract_hyperopt_params(py) -> dict[name, default_value]`、`extract_entry_conditions(py)`、`extract_exit_conditions(py)`；對解析失敗的欄位回傳 sentinel `<unparseable>` 字串並 log warning
-- [ ] 4.4 在 `app/freqtrade/steps.py` 新增 `_write_strategy_spec_snapshot(py_path, prev_py_path, checklist, intent_md, output_path)`：先用 strategy_extractor 萃取結構性資料、再讓 LLM 補充「修訂摘要」與「delta 描述」兩段自然語言；最終 markdown 結構性區段與 LLM 補充區段以章節標題明確區隔
-- [ ] 4.5 在 strategy_extractor 加 unit test：覆蓋標準 freqtrade 策略結構、各種 IntParameter/DecimalParameter/CategoricalParameter 變體、entry/exit 條件含 `&`/`|` 組合、解析失敗 fallback
-- [ ] 4.6 plan_step 完成後呼叫 `_write_strategy_spec_snapshot`（prev_py_path=None、checklist=None、intent_md=None）產 `v0_strategy_spec.md`，僅含結構性區段（無 LLM 補充）
-- [ ] 4.7 `_run_revise` 在 promote 完成後呼叫 `_write_strategy_spec_snapshot`（prev_py_path=v{N-1} 路徑、checklist=當輪 checklist、intent_md=當輪 intent）產 `v{N}_strategy_spec.md`
-- [ ] 4.8 在 `_run_revise` 與 `_run_plan` 中將 `v{N}_strategy_spec.md` 上傳 Planka（透過 sink.upload_spec_attachment）；上傳失敗 log warning 不中斷
-- [ ] 4.9 修改 `app/freqtrade/backtest.py:run_backtest_is_oos`：`strategy_dir` 確保指向 `artifacts/strategies/v{N}/`（promote 後路徑），絕不指向 `artifacts/.staging/`
-- [ ] 4.10 加 test：`v{N}_strategy_spec.md` 中所有結構性參數值與 `.py` AST 萃取結果一致；LLM 補充區段不得包含參數值（由 prompt 設計 + 後驗 regex 雙重保險）
-- [ ] 4.11 加 test：當 `.py` 含無法 AST 解析的欄位，snapshot 對應位置寫 `<unparseable>` 而非 LLM 推測值
-- [ ] 4.12 在 `_write_strategy_spec_snapshot` 中實作 delta 區段分流邏輯：對每個 checklist item 依 type 走不同來源（param 用 from→to + AST 比對驗證、logic 用 expected_signals + forbidden_signals + rationale 文字化）；加 source 標註
-- [ ] 4.13 加 test：param item delta 顯示 `from → to` 且與 AST 萃取值一致；不一致時 raise error
-- [ ] 4.14 加 test：logic item delta 顯示 function + expected_signals + forbidden_signals + rationale 三段；無 from/to 欄位
+- [x] 4.1 修改 `plan_step`：把 `.py` 直接寫入 `artifacts/strategies/v0/{StrategyName}.py`（baseline 無 staging），plan.strategy_file 對應更新
+- [x] 4.2 確認 revise_step subagent 階段寫到 staging（`artifacts/.staging/v{N}/candidate.py`），audit 通過後 promote（task 3.9 涵蓋）
+- [x] 4.3 在 `app/freqtrade/strategy_extractor.py` 新增 deterministic AST 萃取模組：`extract_class_name(py)`、`extract_timeframe(py)`、`extract_stoploss(py)`、`extract_minimal_roi(py)`、`extract_hyperopt_params(py) -> dict[name, default_value]`、`extract_entry_conditions(py)`、`extract_exit_conditions(py)`；對解析失敗的欄位回傳 sentinel `<unparseable>` 字串並 log warning
+- [x] 4.4 在 `app/freqtrade/steps/strategy_snapshot.py` 新增 `write_strategy_spec_snapshot(py_path, prev_py_path, checklist, intent_md, output_path)`：先用 strategy_extractor 萃取結構性資料、intent.md 作為「修訂摘要」自然語言區段嵌入；結構性區段與 LLM 補充區段以章節標題明確區隔
+- [x] 4.5 在 strategy_extractor 加 unit test：覆蓋標準 freqtrade 策略結構、各種 IntParameter/DecimalParameter/CategoricalParameter 變體、entry/exit 條件含 `&`/`|` 組合、解析失敗 fallback
+- [x] 4.6 plan_step 完成後呼叫 `write_strategy_spec_snapshot`（prev_py_path=None、checklist=None、intent_md=None）產 `v0_strategy_spec.md`，僅含結構性區段（無 LLM 補充）
+- [x] 4.7 `revise_step_v2` 在 promote 完成後呼叫 `write_strategy_spec_snapshot`（prev_py_path=舊 strategy_file、checklist=當輪 checklist、intent_md=當輪 intent）產 `v{N}_strategy_spec.md`；mismatch 觸發 SNAPSHOT_DIVERGENCE TERMINATE
+- [x] 4.8 plan_step 與 revise_step_v2 將 `v{N}_strategy_spec.md` 加入 artifacts list（type=`strategy_spec`），由 `_upload_new_artifacts` 自動上傳 Planka（不在 §7 過濾名單內，pass-through）
+- [x] 4.9 修改 `app/freqtrade/backtest.py:run_backtest_is_oos`：strategy_dir 加防呆 — 若指向 `.staging` 直接 raise ValueError
+- [x] 4.10 加 test：`v{N}_strategy_spec.md` 中所有結構性參數值與 `.py` AST 萃取結果一致；LLM 補充區段值不污染結構性區段（test_strategy_snapshot.py::TestStructuralFromAST）
+- [x] 4.11 加 test：當 `.py` 含無法 AST 解析的欄位，snapshot 對應位置寫 `<unparseable>` 而非 LLM 推測值（TestUnparseable）
+- [x] 4.12 在 `write_strategy_spec_snapshot` 中實作 delta 區段分流邏輯：對每個 checklist item 依 type 走不同來源（param 用 from→to + AST 比對驗證、logic 用 expected_signals + forbidden_signals + rationale 文字化）；加 source 標註
+- [x] 4.13 加 test：param item delta 顯示 `from → to` 且與 AST 萃取值一致；不一致時 raise error（TestParamDelta）
+- [x] 4.14 加 test：logic item delta 顯示 function + expected_signals + forbidden_signals + rationale 三段；無 from/to 欄位（TestLogicDelta）
 
 ## 5. Bug 修補：max_loops 同步
 
