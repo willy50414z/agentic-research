@@ -32,7 +32,7 @@ def revise_step_v1(state: dict) -> dict:
     attempt = state.get("analyze_attempt", 0)
     plan    = dict(state.get("implementation_plan") or {})
     reason  = state.get("last_reason", "")
-    logger.info("[freqtrade] revise[v1]  loop=%d  analyze_attempt=%d", loop, attempt)
+    logger.info("[workflow][revise[v1]] START  loop=%d  analyze_attempt=%d", loop, attempt)
 
     output_dir = str(ARTIFACTS_DIR.resolve())
 
@@ -108,6 +108,7 @@ def revise_step_v1(state: dict) -> dict:
     direction_path = str(ARTIFACTS_DIR / f"v{attempt}_revised_direction.md")
     _write_artifact(direction_path, "".join(direction_lines))
 
+    logger.info("[workflow][revise[v1]] END  loop=%d  analyze_attempt=%d", loop, attempt)
     return {
         "implementation_plan":  revised,
         "last_reason":          validate_reason,

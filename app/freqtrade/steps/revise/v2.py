@@ -77,7 +77,7 @@ class StageHistory:
     final_verdict: str | None = None
 
     def log(self, msg: str) -> None:
-        logger.info("[revise[v2]] %s", msg)
+        logger.info("[workflow][revise[v2]] %s", msg)
         self.events.append(msg)
 
 
@@ -460,7 +460,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     history = StageHistory()
-    history.log(f"start v2 revise iteration={iteration}")
+    history.log(f"orchestrator START iteration={iteration}")
 
     counters = {
         "intent_retry": 0,
@@ -475,7 +475,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
     direction_path = ARTIFACTS_DIR / f"v{iteration}_revised_direction.md"
 
     def _terminate(reason: str, detail: str = "") -> dict:
-        history.log(f"TERMINATE reason={reason} detail={detail}")
+        history.log(f"orchestrator END verdict=TERMINATE reason={reason} detail={detail}")
         history.final_verdict = f"TERMINATE — {reason}"
         _write_audit_log_md(
             history=history, counters=counters, iteration=iteration,
@@ -493,7 +493,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
     audit_feedback: str | None = None
     while counters["intent_retry"] <= MAX_RETRIES:
         attempt = counters["intent_retry"]
-        history.log(f"Stage A attempt={attempt}")
+        history.log(f"Stage A attempt={attempt} START")
         try:
             intent_path = _stage_a_intent(
                 state=state, staging_dir=staging_dir,
@@ -504,8 +504,9 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             return _terminate(e.reason, e.detail)
         except Exception as e:  # subprocess error / IO failure / etc.
             return _terminate("STAGE_A_LLM_FAILED", detail=f"{type(e).__name__}: {e}")
+        history.log(f"Stage A attempt={attempt} END intent={intent_path.name}")
 
-        history.log(f"Stage B attempt={attempt}")
+        history.log(f"Stage B attempt={attempt} START")
         try:
             approved, feedback = _stage_b_audit_intent(
                 intent_path=intent_path, state=state,
@@ -515,11 +516,10 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             return _terminate(e.reason, e.detail)
         except Exception as e:
             return _terminate("STAGE_B_LLM_FAILED", detail=f"{type(e).__name__}: {e}")
+        history.log(f"Stage B attempt={attempt} END verdict={'APPROVED' if approved else 'REJECTED'}")
 
         if approved:
-            history.log(f"intent APPROVED on attempt={attempt}")
             break
-        history.log(f"intent REJECTED on attempt={attempt}")
         audit_feedback = feedback
         counters["intent_retry"] += 1
     else:
@@ -536,7 +536,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
 
     while counters["checklist_retry"] <= MAX_RETRIES:
         ck_attempt = counters["checklist_retry"]
-        history.log(f"Stage C attempt={ck_attempt}")
+        history.log(f"Stage C attempt={ck_attempt} START")
         try:
             checklist, checklist_path = _stage_c_checklist(
                 intent_path=intent_path, state=state,
@@ -545,7 +545,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                 call_llm=call_llm,
             )
         except ValidationError as e:
-            history.log(f"Stage C schema validation FAIL: {e}")
+            history.log(f"Stage C attempt={ck_attempt} END schema_FAIL: {e}")
             counters["checklist_retry"] += 1
             checklist_feedback = f"上一份 checklist schema 不合法：{e}"
             continue
@@ -553,6 +553,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             return _terminate(e.reason, e.detail)
         except Exception as e:
             return _terminate("STAGE_C_LLM_FAILED", detail=f"{type(e).__name__}: {e}")
+        history.log(f"Stage C attempt={ck_attempt} END items={len(checklist.items)}")
 
         # subagent_retry resets on each new checklist (per spec)
         counters["subagent_retry"] = 0
@@ -564,7 +565,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
         while counters["subagent_retry"] <= MAX_RETRIES:
             sa_attempt = counters["subagent_retry"]
             history.log(
-                f"Stage D ck_attempt={ck_attempt} sa_attempt={sa_attempt}"
+                f"Stage D ck_attempt={ck_attempt} sa_attempt={sa_attempt} START"
             )
             try:
                 candidate_path, completion_report = _stage_d_subagent(
@@ -582,7 +583,10 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                 )
 
             decision = cross_check(checklist, completion_report)
-            history.log(f"cross_check → {decision.value}")
+            history.log(
+                f"Stage D ck_attempt={ck_attempt} sa_attempt={sa_attempt} END "
+                f"decision={decision.value}"
+            )
             if decision == RoutingDecision.UNIMPLEMENTABLE_CHECKLIST:
                 # subagent says checklist itself is broken → back to Stage C
                 checklist_feedback = (
@@ -605,7 +609,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                 continue
             # READY_FOR_AUDIT
             history.log(
-                f"Stage E ck_attempt={ck_attempt} sa_attempt={sa_attempt}"
+                f"Stage E ck_attempt={ck_attempt} sa_attempt={sa_attempt} START"
             )
             try:
                 audit_report = _stage_e_audit(
@@ -620,6 +624,12 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                 return _terminate(
                     "STAGE_E_FAILED", detail=f"{type(e).__name__}: {e}",
                 )
+            history.log(
+                f"Stage E ck_attempt={ck_attempt} sa_attempt={sa_attempt} END "
+                f"overall={audit_report.overall.value}"
+                + (f" reject_summary={audit_report.reject_summary!r}"
+                   if audit_report.reject_summary else "")
+            )
 
             last_audit_report = audit_report
 
@@ -726,6 +736,11 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
         history.log(f"strategy_spec snapshot failed (non-fatal): {e}")
 
     plan["strategy_file"] = str(promoted_path)
+
+    history.log(
+        f"orchestrator END verdict=APPROVED iteration={iteration} "
+        f"ck_attempt={counters['checklist_retry']} sa_attempt={counters['subagent_retry']}"
+    )
 
     return {
         "implementation_plan": plan,

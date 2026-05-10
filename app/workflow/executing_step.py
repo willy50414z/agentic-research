@@ -90,13 +90,13 @@ def dispatch_step(
             logger.warning("[dispatch] unrecognised workflow_step '%s' for project '%s'.", raw_step, project_id)
             return
 
-        logger.info("[dispatch] project='%s' step='%s'", project_id, step)
+        logger.info("[workflow][dispatch] project='%s' step='%s'", project_id, step)
 
         state = _build_state(project)
 
         handler: _StepHandler | None = _STEP_HANDLERS.get(step)
         if handler is None:
-            logger.info("[dispatch] terminal step '%s' for project '%s' — workflow complete.", step, project_id)
+            logger.info("[workflow][dispatch] terminal step '%s' for project '%s' — workflow complete.", step, project_id)
             return
 
         try:
@@ -115,7 +115,7 @@ def dispatch_step(
         # Stop if a HITL pause was triggered (e.g. plan_approval)
         refreshed = get_project(project_id, db_url)
         if refreshed and (refreshed.get("config") or {}).get("paused_at"):
-            logger.info("[dispatch] HITL pause — stopping loop for project '%s'.", project_id)
+            logger.info("[workflow][dispatch] HITL pause — stopping loop for project '%s'.", project_id)
             return
 
 
@@ -127,7 +127,7 @@ def _run_plan(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[plan] START  project='%s'", project_id)
+    logger.info("[workflow][plan] START  project='%s'", project_id)
     updates = plan_step(state)
     _merge_state(project_id, updates, db_url)
 
@@ -142,21 +142,21 @@ def _run_plan(
                 f"**計畫待審核**\n\n```json\n{preview}\n```\n\n"
                 "確認後將卡片移回 **Executing** 繼續，或留在 **Review** 暫停。",
             )
-        logger.info("[plan] HITL pause — moved to Review  project='%s'", project_id)
+        logger.info("[workflow][plan] END HITL pause — moved to Review  project='%s'", project_id)
         return
 
     if sink:
         _upload_plan_artifacts(project_id, sink)
 
     set_workflow_step(project_id, WorkflowStep.IMPLEMENT, db_url)
-    logger.info("[plan] DONE → implement  project='%s'", project_id)
+    logger.info("[workflow][plan] END → implement  project='%s'", project_id)
 
 
 def _run_implement(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[implement] START  project='%s'", project_id)
+    logger.info("[workflow][implement] START  project='%s'", project_id)
 
     if state.get("paused_at") == "plan_approval":
         merge_config(project_id, {"paused_at": None}, db_url)
@@ -184,25 +184,25 @@ def _run_implement(
         _upload_new_artifacts(project_id, updates.get("artifacts", []), prev_artifact_paths, sink)
 
     set_workflow_step(project_id, WorkflowStep.TEST, db_url)
-    logger.info("[implement] DONE → test  project='%s'", project_id)
+    logger.info("[workflow][implement] END → test  project='%s'", project_id)
 
 
 def _run_test(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[test] START  project='%s'", project_id)
+    logger.info("[workflow][test] START  project='%s'", project_id)
     updates = test_step(state)
     _merge_state(project_id, updates, db_url)
     set_workflow_step(project_id, WorkflowStep.ANALYZE, db_url)
-    logger.info("[test] DONE → analyze  project='%s'", project_id)
+    logger.info("[workflow][test] END → analyze  project='%s'", project_id)
 
 
 def _run_analyze(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[analyze] START  project='%s'", project_id)
+    logger.info("[workflow][analyze] START  project='%s'", project_id)
     updates = analyze_step(state)
 
     # analyze_step returns only last_result and last_reason; all other values come from state.
@@ -218,7 +218,7 @@ def _run_analyze(
     final_updates = {**updates, "last_result": result, "last_reason": reason, "analyze_attempt": analyze_attempt}
     _merge_state(project_id, final_updates, db_url)
 
-    logger.info("[analyze] result=%s attempt=%d/%d  project='%s'", result, analyze_attempt, max_loops, project_id)
+    logger.info("[workflow][analyze] END result=%s attempt=%d/%d  project='%s'", result, analyze_attempt, max_loops, project_id)
 
     record_loop_metrics(
         project_id=project_id, loop_index=analyze_attempt,
@@ -243,7 +243,7 @@ def _run_summarize(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[summarize] START  project='%s'", project_id)
+    logger.info("[workflow][summarize] START  project='%s'", project_id)
     updates = summarize_step(state)
     _merge_state(project_id, updates, db_url)
 
@@ -270,7 +270,7 @@ def _run_summarize(
 
     set_workflow_step(project_id, WorkflowStep.DONE, db_url)
     _move(project_id, PlankaColumn.DONE, move_card_fn)
-    logger.info("[summarize] DONE → Done  project='%s'", project_id)
+    logger.info("[workflow][summarize] END → Done  project='%s'", project_id)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +429,7 @@ def _run_revise(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[revise] START  project='%s'", project_id)
+    logger.info("[workflow][revise] START  project='%s'", project_id)
 
     # §10.1 / §10.2 — Resolve and lock REVISE_PIPELINE_VERSION on first revise entry.
     # Per spec `fail-path-revise-plan` and design D12: a project's revise rounds
@@ -468,7 +468,7 @@ def _run_revise(
         if sink:
             _upload_new_artifacts(project_id, new_artifacts, prev_artifact_paths, sink)
         set_workflow_step(project_id, WorkflowStep.TERMINATE, db_url)
-        logger.info("[revise] TERMINATE signal from revise_step  project='%s'", project_id)
+        logger.info("[workflow][revise] END TERMINATE signal from revise_step  project='%s'", project_id)
         return
 
     _merge_state(project_id, updates, db_url)
@@ -480,14 +480,14 @@ def _run_revise(
         _upload_new_artifacts(project_id, new_artifacts, prev_artifact_paths, sink)
 
     set_workflow_step(project_id, WorkflowStep.IMPLEMENT, db_url)
-    logger.info("[revise] DONE → implement  project='%s'", project_id)
+    logger.info("[workflow][revise] END → implement  project='%s'", project_id)
 
 
 def _run_terminate_summarize(
     project_id: str, state: dict,
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
-    logger.info("[terminate] START  project='%s'", project_id)
+    logger.info("[workflow][terminate] START  project='%s'", project_id)
     updates = terminate_summarize_step(state)
     _merge_state(project_id, updates, db_url)
 
@@ -519,7 +519,7 @@ def _run_terminate_summarize(
 
     _move(project_id, PlankaColumn.REVIEW, move_card_fn)
     set_workflow_step(project_id, WorkflowStep.DONE, db_url)
-    logger.info("[terminate] DONE  project='%s'", project_id)
+    logger.info("[workflow][terminate] END  project='%s'", project_id)
 
 
 _STEP_HANDLERS: dict[WorkflowStep, _StepHandler] = {
