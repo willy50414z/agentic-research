@@ -70,22 +70,22 @@
 
 ## 5. Bug 修補：max_loops 同步
 
-- [ ] 5.1 修改 `app/api/server.py:run_dispatch_bg`：在 `read_card_custom_fields` → `merge_config` 後重新 `get_project` 確認寫入；log card raw / merged / state 三個值
-- [ ] 5.2 在 `_build_state` 開頭 log 實際讀到的 `cfg.get("max_loops")` 與最終 state 值
-- [ ] 5.3 加 sanity check：若 card raw、merged、state 三者不一致 log warning（不阻擋）
-- [ ] 5.4 在 `tests/api/test_dispatch_bg.py` 加測試覆蓋同步時序與 mismatch warning
+- [x] 5.1 修改 `app/api/server.py:run_dispatch_bg`：在 `read_card_custom_fields` → `merge_config` 後重新 `get_project` 確認寫入；log card raw / merged / state 三個值
+- [x] 5.2 在 `_build_state` 開頭 log 實際讀到的 `cfg.get("max_loops")` 與最終 state 值
+- [x] 5.3 加 sanity check：若 card raw、merged、state 三者不一致 log warning（不阻擋）
+- [x] 5.4 在 `tests/api/test_dispatch_bg.py` 加測試覆蓋同步時序與 mismatch warning
 
 ## 6. Bug 修補：summary 檔名
 
-- [ ] 6.1 修改 `app/workflow/executing_step.py:_run_terminate_summarize`：filename 計算改用 `f"v0_{analyze_attempt - 1}_summary_report.md"`
-- [ ] 6.2 同步修改 post_comment 中的檔名引用
-- [ ] 6.3 加 unit test 覆蓋 analyze_attempt = 1, 2, 3 對應檔名
+- [x] 6.1 修改 `app/workflow/executing_step.py:_run_terminate_summarize`：filename 計算改用 `f"v0_{analyze_attempt - 1}_summary_report.md"`
+- [x] 6.2 同步修改 post_comment 中的檔名引用
+- [x] 6.3 加 unit test 覆蓋 analyze_attempt = 1, 2, 3 對應檔名
 
 ## 7. Bug 修補：is/oos zip 重複上傳
 
-- [ ] 7.1 修改 `app/workflow/executing_step.py:_upload_new_artifacts`：過濾 `type ∈ {is_zip, oos_zip, is_result, oos_result, trades, signals, report}`，僅保留 `revised_direction`、`audit`、`strategy_spec` 等 markdown 類別
-- [ ] 7.2 確認 `_upload_iteration_zip` 仍把 is_zip / oos_zip 等納入 `v{N}_backtest.zip`
-- [ ] 7.3 加 unit test 覆蓋 `_upload_new_artifacts` 過濾邏輯
+- [x] 7.1 修改 `app/workflow/executing_step.py:_upload_new_artifacts`：過濾 `type ∈ {is_zip, oos_zip, is_result, oos_result, trades, signals, report}`，僅保留 `revised_direction`、`audit`、`strategy_spec` 等 markdown 類別
+- [x] 7.2 確認 `_upload_iteration_zip` 仍把 is_zip / oos_zip 等納入 `v{N}_backtest.zip`
+- [x] 7.3 加 unit test 覆蓋 `_upload_new_artifacts` 過濾邏輯
 
 ## 8. 整合測試與驗證
 
@@ -97,10 +97,10 @@
 
 ## 9. 文件與 migration
 
-- [ ] 9.1 更新 `.ai/skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md`：說明每輪獨立 `.py` 目錄與 strategy_spec 快照的存在
-- [ ] 9.2 更新 `docs/superpowers/specs/2026-04-23-e2e-test-skill-design.md`：補上 revise v2 的 audit log / staged artifacts / strategy snapshot 驗證要求；若未來 `.ai/skills/e2e-test/SKILL.md` 建立，需同步落實
-- [ ] 9.3 在 `docs/AGENTIC_RESEARCH_SOP_ZH.md` 加入 revise pipeline 流程圖（Stage A-E）
-- [ ] 9.4 撰寫 `openspec/changes/revise-pipeline-checklist-audit/MIGRATION.md`：說明部署順序、feature flag、rollback 策略
+- [x] 9.1 更新 `.ai/skills/freqtrade/trade-strategy-freqtrade-implementation/SKILL.md`：說明每輪獨立 `.py` 目錄與 strategy_spec 快照的存在
+- [x] 9.2 更新 `docs/superpowers/specs/2026-04-23-e2e-test-skill-design.md`：補上 revise v2 的 audit log / staged artifacts / strategy snapshot 驗證要求；若未來 `.ai/skills/e2e-test/SKILL.md` 建立，需同步落實
+- [x] 9.3 在 `docs/AGENTIC_RESEARCH_SOP_ZH.md` 加入 revise pipeline 流程圖（Stage A-E）
+- [x] 9.4 撰寫 `openspec/changes/revise-pipeline-checklist-audit/MIGRATION.md`：說明部署順序、feature flag、rollback 策略
 
 ## 10. Feature flag 與 rollout
 

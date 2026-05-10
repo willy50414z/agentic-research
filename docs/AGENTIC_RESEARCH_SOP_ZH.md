@@ -24,7 +24,7 @@
 7. [技術參考](#技術參考)
    - [Resume API 使用方式](#resume-api-使用方式)
    - [完整附件與產出檔案清單](#完整附件與產出檔案清單)
-   - [下一階段：Freqtrade 回測整合](#下一階段freqtrade-回測整合)
+   - [Freqtrade 回測整合架構](#freqtrade-回測整合架構)
    - [DB 記錄驗證指令](#db-記錄驗證指令)
    - [異常排查](#異常排查)
 
@@ -84,6 +84,7 @@ curl -s http://localhost:7001/health/llm
 | `MINIO_*`           | MinIO 連線設定（用於附件存儲）                                |
 | `PLANKA_*`          | Planka 連線設定                                               |
 | `ARTIFACTS_DIR`     | 研究產出目錄（預設 `./artifacts`）                            |
+| `BACKTEST_MODE`     | 回測模式：`mock`（預設，使用 hash-seed 假資料）或 `real`（呼叫真實 Freqtrade CLI） |
 
 ---
 
@@ -342,8 +343,8 @@ docker logs -f agentic-framework-api 2>&1 | grep -E "spec-review|card|project"
 | 節點 | 狀態 | 執行者 | 使用 Prompt | 輸出檔案 |
 |------|------|--------|------------|---------|
 | **plan** | ✅ | LLM（Claude） | `quant_alpha/plan.txt` | `artifacts/strategies/<StrategyName>.py`、`artifacts/plan_output.json` |
-| **implement** | 🚧 | Python（`backtest.py`） | — | `artifacts/loop_N_train.json` |
-| **test** | 🚧 | Python（`backtest.py`） | — | graph state `test_metrics` |
+| **implement** | ✅ | Python（`backtest.py` + Freqtrade CLI） | — | `loop_N_is.json`、`loop_N_oos.json`、`loop_N_trades.json`、`loop_N_signals.json`、`loop_N_report.html` |
+| **test** | ✅ | Python（plugin.py） | — | graph state `test_metrics`（格式：`{"is": {...}, "oos": {...}}`） |
 | **analyze** | ✅ | LLM（Claude） | `quant_alpha/analyze.txt` | `artifacts/analyze_result.txt` |
 | **revise**（FAIL 時） | ✅ | LLM（Claude） | `quant_alpha/revise.txt` | `artifacts/revise_result.txt`、`artifacts/revised_params.json` |
 | **summarize**（PASS 時） | ✅ | LLM（Claude） | `quant_alpha/summarize.txt` | `artifacts/loop_summary.md` → 上傳 Planka |
@@ -357,7 +358,7 @@ docker logs -f agentic-framework-api 2>&1 | grep -E "spec-review|card|project"
 | Prompt | 注入變數 |
 |--------|---------|
 | `plan.txt` | `{SPEC}`（`reviewed_spec_final.md` 全文）、`{loop_index}`、`{last_decision}`、`{STRATEGY_DIR}`、`{OUTPUT_DIR}` |
-| `analyze.txt` | `{RULES_PATH}`、`{strategy_name}`、`{params}`、`{loop_index}`、`{win_rate}`、`{alpha_ratio}`、`{max_drawdown}`、`{profit_factor}`、`{n_trades}`、`{target_win_rate}`、`{target_profit_factor}`、`{OUTPUT_DIR}` |
+| `analyze.txt` | `{RULES_PATH}`、`{strategy_name}`、`{params}`、`{loop_index}`、IS 指標（`{is_win_rate}`、`{is_max_drawdown}`、`{is_profit_factor}`、`{is_n_trades}`）、OOS 指標（`{win_rate}`、`{alpha_ratio}`、`{max_drawdown}`、`{profit_factor}`、`{n_trades}`）、`{target_win_rate}`、`{target_profit_factor}`、`{OUTPUT_DIR}` |
 | `revise.txt` | `{params}`（plan_output.json 全文）、`{reason}`、`{attempt_count}`、`{OUTPUT_DIR}` |
 | `summarize.txt` | `{project_id}`、`{goal}`、`{loop_index}`、`{strategy_name}`、`{params}`、`{win_rate}`、`{alpha_ratio}`、`{max_drawdown}`、`{profit_factor}`、`{n_trades}`、`{total_return}`、`{OUTPUT_DIR}` |
 | `terminate_summary.txt` | `{project_id}`、`{goal}`、`{strategy_name}`、`{terminate_reason}`、`{attempt_count}`、`{attempts_table}`、`{target_win_rate}`、`{OUTPUT_DIR}` |
@@ -384,54 +385,71 @@ LLM 讀取 `reviewed_spec_final.md` 全文（注入為 `{SPEC}`），嚴格依�
   "timeframe": "1h",
   "stoploss": -0.05,
   "parameters": {"rsi_period": 14, "rsi_buy": 35.0, "rsi_sell": 70.0},
+  "run_mode": "backtest",
   "_reason": "首輪依 spec 實作：RSI 14 期，買入 < 35，賣出 > 70"
 }
 ```
 
+`run_mode` 可選值：`backtest`（基本 IS/OOS 回測，預設）、`hyperopt`（參數優化）、`cross_test`（多組 grid search）。
+
 **步驟 2 — 人機協作暫停（HITL）🚧**
 
-> **目前狀態：** `needs_human_approval` 硬編碼為 `False`，HITL 暫停已停用。Freqtrade 整合後恢復啟用，讓使用者在看到策略程式碼後確認是否繼續。
+> **目前狀態：** `needs_human_approval` 在 mock 模式下硬編碼為 `False`，HITL 暫停暫停停用。real 模式下可依需求恢復啟用，讓使用者在看到策略程式碼後確認是否繼續。
 
 計畫中行為：
 1. 卡片移至 **Review**，貼出計畫審核留言
 2. 使用者審核策略程式碼後，將卡片拖回 **Verify** 或呼叫 Resume API（`action: approve`）
 
-**步驟 3 — 實作 IS 回測（implement）🚧**
+**步驟 3 — 實作 IS/OOS 回測（implement）✅**
 
-> **目前為 stub 實作：** `backtest.py` 以固定種子的隨機數模擬回測指標（`win_rate`、`profit_factor`、`alpha_ratio`、`max_drawdown`、`n_trades`、`total_return`），種子由 `n_bars + strategy_name + params` 決定，確保相同輸入產生相同輸出。
+`implement_node` 依 `BACKTEST_MODE` 環境變數選擇執行路徑：
 
-計畫中（Freqtrade 整合後）：
-- 呼叫 `freqtrade_backtest_executor.py`，以 Freqtrade CLI 執行 IS 回測
-- IS 期間對應 spec 的 `train_timerange`（例：`20210101-20240101`）
-- Freqtrade CLI 產出 `.zip` 壓縮檔至 `user_data/backtest_results/`
-- 呼叫 `analyze_backtest_result.py` 解析 `.zip`，提取 IS 指標：`winrate`、`profit_factor`、`max_drawdown_account`、`sharpe`、`sortino`、`calmar`、`profit_total_pct`
-- 結果存為 `artifacts/loop_N_train.json`
+| BACKTEST_MODE | 行為 |
+|---------------|------|
+| `mock`（預設） | 以 hash-seed 確定性假資料模擬 IS+OOS 指標（`strategy_name + params` 為種子），現有測試零改動 |
+| `real` | 呼叫 Freqtrade CLI 執行真實回測 |
 
-**步驟 4 — 測試 OOS 回測（test）🚧**
+`real` 模式流程：
+1. `config_generator.py`：從 `spec` 動態生成 Freqtrade `config.json`（pair、timeframe、exchange、fee 等）
+2. `freqtrade_runner.py`：呼叫 `freqtrade backtesting`，IS 期間對應 `spec["data"]["train_period"]`（如 `20210101-20240101`）
+3. 同上執行 OOS 期間（`spec["data"]["test_period"]`，如 `20240101-20260101`）
+4. `result_parser.py`：解析 `.zip` 產出，生成 5 份 loop 產出檔案（見「產出檔案清單」）
+5. 結果附加至 `artifacts/execution_log.md`（跨 loop markdown 表格）
 
-> **目前為 stub 實作：** 同 implement，以稍微不同的 `n_bars`（`300 + attempt * 50`）調用 `backtest.py`，模擬 OOS 指標。
+每次 `implement_node` 建立持久化隔離工作目錄：`artifacts/.llm_io/{loop_index}_{timestamp}/`
 
-計畫中（Freqtrade 整合後）：
-- 對應 spec 的 `val_timerange`（例：`20240101-20260101`）
-- 提取 OOS 指標（與 IS 相同欄位集合）
-- analyze 節點將同時收到 IS + OOS 兩組指標進行評估
+**步驟 4 — 測試 OOS 回測（test）✅**
+
+`test_node` 在 `real` 模式下直接從 `implement_node` 存入 state 的結果取回 OOS 指標，不重新執行 Freqtrade（避免雙重執行）；`mock` 模式則同 implement，以 hash-seed 生成確定性假資料。
+
+`test_metrics` 格式（升級為 IS/OOS 雙組）：
+```json
+{
+  "is":  {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.12, "n_trades": 120},
+  "oos": {"win_rate": 0.52, "profit_factor": 1.2, "max_drawdown": 0.14, "n_trades": 45}
+}
+```
 
 **步驟 5 — 分析（analyze）✅**
 
 LLM 讀取 `.ai/rules/backtest-required-metrics.md`（用工具讀取，不注入）取得評估門檻，對照回測指標決定：
 
-通過條件（全部達到才算 PASS）：
+通過條件（全部達到才算 PASS，以 OOS 為主要評估依據）：
+
 | 指標 | 門檻 | 來源 |
 |------|------|------|
-| `win_rate` | ≥ spec 中的 `target_win_rate`（預設 0.55） | spec `## Performance Thresholds` |
-| `alpha_ratio` | ≥ 1.0 | 固定門檻 |
-| `max_drawdown` | ≤ 0.20 | 固定門檻 |
-| `profit_factor` | ≥ spec 中的 `target_profit_factor`（預設 1.2） | spec `## Performance Thresholds` |
+| OOS `win_rate` | ≥ `target_win_rate`（spec 設定，如 0.55） | spec `## Performance Thresholds` |
+| OOS `max_drawdown` | ≤ 0.20 | 固定門檻 |
+| OOS `profit_factor` | ≥ `target_profit_factor`（spec 設定，如 1.2） | spec `## Performance Thresholds` |
+| OOS `profit_factor` | ≥ IS `profit_factor` × 0.8（防過擬合） | 固定門檻 |
+| OOS `win_rate` | ≥ IS `win_rate` × 0.8（防過擬合） | 固定門檻 |
+
+> `alpha_ratio`（策略報酬 / 買進持有）僅在 mock 模式下有效（>1.0 代表超越大盤）；Freqtrade 真實回測模式下為 0，不作為評估依據。
 
 LLM 寫出 `artifacts/analyze_result.txt`：
 ```
 PASS
-win_rate=0.58 ≥ 0.55, alpha_ratio=1.12 ≥ 1.0, drawdown=0.15 ≤ 0.20, profit_factor=1.35 ≥ 1.2
+OOS win_rate=0.52 ≥ 0.55✗  →  FAIL 範例；或：OOS pf=1.25 ≥ IS pf×0.8=1.04 ✓ ...
 ```
 第 1 行：`PASS`、`FAIL` 或 `TERMINATE`；第 2 行：一句話說明哪些指標通過或未通過。
 
@@ -444,6 +462,10 @@ win_rate=0.58 ≥ 0.55, alpha_ratio=1.12 ≥ 1.0, drawdown=0.15 ≤ 0.20, profit
 
 **步驟 6a — 修正（revise，FAIL 時）✅**
 
+> **版本說明**：revise 流程由環境變數 `REVISE_PIPELINE_VERSION` 控制：`v1` 走舊 2-LLM JSON 驗證流程；`v2` 走 intent → checklist → subagent → audit 五階段流程（同一 project 生命週期內版本不可中途切換）。
+
+##### v1 流程（舊 2-LLM JSON 驗證）
+
 LLM 收到失敗原因與當前 `plan_output.json` 參數，調整指標參數後寫出：
 - `artifacts/revise_result.txt`（第 1 行：`REVISED` 或 `TERMINATE`；第 2 行：調整說明）
 - `artifacts/revised_params.json`（與 `plan_output.json` 格式相同的調整後參數）
@@ -453,6 +475,62 @@ LLM 收到失敗原因與當前 `plan_output.json` 參數，調整指標參數�
 若 LLM 不可用，rule-based fallback：每次將 `stoploss` 縮小 0.01（最多至 -0.02）。
 
 最多嘗試 3 次（`attempt >= 3` 時強制 TERMINATE）。
+
+##### v2 流程（intent → checklist → subagent → audit 五階段）
+
+v2 流程的核心動機：v1 審核的對象是 `revised_params.json`（dict），但實際執行的對象是 `.py`（class attribute / hyperopt parameter default），兩者脫鉤導致迴圈失效。v2 的修訂直接寫到 `.py`，並用 deterministic AST + LLM3 雙層 audit 驗證。
+
+```
+plan → implement → test → analyze ─┬─PASS─→ summarize → done
+                                    │
+                                    └─FAIL─→ revise (v2) ─┐
+                                                          │
+   ┌──────────────────────────────────────────────────────┘
+   ↓
+   Stage A: LLM1 提案 intent（intent_retry ≤ 2）
+            ↓ 產出 revision_intent.md
+   Stage B: LLM2 審 intent（APPROVED / REJECTED）
+            ↓ APPROVED
+   Stage C: LLM2 翻譯 intent → checklist.yaml（checklist_retry ≤ 2）
+            ↓ 鎖定 locked: true
+   Stage D: subagent 寫 candidate.py + completion_report.yaml（subagent_retry ≤ 2）
+            ↓ 寫到 artifacts/.staging/v{N}/candidate.py
+   Stage E: deterministic check（AST 比對 param + invariants + unauthorized_change）
+            ↓ all PASS
+            LLM3 audit logic items（INSUFFICIENT 即 CHECKLIST_AMBIGUOUS）
+            ↓ overall: APPROVED
+   promote staging → artifacts/strategies/v{N}/{StrategyName}.py
+            ↓
+   產出 v{N}_strategy_spec.md（AST 萃取）+ v{N}_revised_direction.md + v{N}_audit.md
+            ↓ 上傳 Planka
+   implement（freqtrade --strategy-path artifacts/strategies/v{N}/ 跑 backtest）
+```
+
+**Retry counter 上限**：
+
+| Counter | 觸發條件 | 上限 | 超過 |
+|---|---|---|---|
+| `intent_retry` | Stage B REJECTED | 2 | TERMINATE |
+| `checklist_retry` | UNIMPLEMENTABLE_CHECKLIST 或 CHECKLIST_AMBIGUOUS | 2 | TERMINATE |
+| `subagent_retry` | IMPLEMENTATION_FAILED | 2 | TERMINATE |
+| `dishonest_attempt` | deterministic 或 LLM3 任一層 `subagent_self_report_consistent: false` 連續兩輪 | 2 | TERMINATE |
+
+任一 counter 超 2 次 → 該輪 revise TERMINATE，staging 保留供 forensics、`plan.strategy_file` 維持指向 v{N-1}。
+
+**Promote 規則**：
+
+- 僅當 audit `overall: APPROVED` 才將 `artifacts/.staging/v{N}/candidate.py` atomic move 到 `artifacts/strategies/v{N}/{StrategyName}.py`
+- TERMINATE 時 `artifacts/strategies/v{N}/` 不建立；後續若觸發 implement 仍走 v{N-1} 路徑
+
+**版本切換 (`REVISE_PIPELINE_VERSION`)**：
+
+| 值 | 行為 |
+|---|---|
+| `v1`（預設） | 走舊 2-LLM JSON 流程 |
+| `v2` | 走五階段 + staging 流程 |
+| 未設或非法值 | fallback `v1` 並 log warning |
+
+dispatch 第一次進入 revise 時將決定的版本寫入 `projects.config.revise_pipeline_version`，後續輪次以 DB 記錄為準（避免中途切換造成 artifacts 命名空間混亂）。Rollback 只需把 env var 改回 `v1` 即恢復舊行為。
 
 **步驟 6b — 摘要（summarize，PASS 時）✅**
 
@@ -601,12 +679,22 @@ curl -s -X POST http://localhost:7001/resume \
 |------|------|------|
 | `strategies/<StrategyName>.py` | `plan.txt`（LLM） | Freqtrade IStrategy 策略類別 |
 | `plan_output.json` | `plan.txt`（LLM） | 策略元資料（名稱、參數、stoploss） |
-| `loop_N_train.json` | `implement`（Python） | IS 回測結果 |
+| `loop_N_is.json` | `implement`（Python + Freqtrade） | IS 回測指標（win_rate、profit_factor、max_drawdown、n_trades） |
+| `loop_N_oos.json` | `implement`（Python + Freqtrade） | OOS 回測指標（同上） |
+| `loop_N_trades.json` | `implement`（Python + Freqtrade） | 逐筆交易紀錄（進出場時間、價格、損益） |
+| `loop_N_signals.json` | `implement`（Python + Freqtrade） | entry/exit signal 數據 |
+| `loop_N_report.html` | `implement`（Python + Freqtrade） | 完整 HTML 報告（指標 + 圖表） |
 | `analyze_result.txt` | `analyze.txt`（LLM） | 第 1 行：PASS/FAIL/TERMINATE；第 2 行：原因 |
 | `revise_result.txt` | `revise.txt`（LLM） | 第 1 行：REVISED/TERMINATE；第 2 行：調整說明 |
 | `revised_params.json` | `revise.txt`（LLM） | 調整後的策略元資料（與 `plan_output.json` 同格式） |
 | `loop_summary.md` | `summarize.txt`（LLM） | 本輪 Markdown 研究報告（上傳後覆蓋） |
 | `termination_report.md` | `terminate_summary.txt`（LLM） | 終止報告 |
+| `execution_log.md` | `implement`（Python） | 跨 loop 執行紀錄表格（每次 loop append 一行） |
+
+> `execution_log.md` 格式（每次 loop append）：
+> ```
+> | {timestamp} | loop {N} | {strategy_name} | {run_mode} | IS pf={X} wr={Y} | OOS pf={X} wr={Y} | {PASS/FAIL} |
+> ```
 
 #### Spec Review 流控檔案 — 不上傳 Planka
 
@@ -618,69 +706,54 @@ curl -s -X POST http://localhost:7001/resume \
 
 ---
 
-### 下一階段：Freqtrade 回測整合
+### Freqtrade 回測整合架構
 
-> **狀態：📋 計畫中**
+> **狀態：✅ 已實作**（`BACKTEST_MODE=real` 啟用）
 
-本節記錄 implement/test 節點的 Freqtrade 整合設計，供下一階段開發參考。
-
-#### 整合架構
+#### 調用鏈
 
 ```
-plan.txt（LLM）
-  └→ artifacts/strategies/<StrategyName>.py
-        │
-        ├─ implement 節點（IS 回測）
-        │    └→ freqtrade_backtest_executor.py
-        │         --strategy <StrategyName>
-        │         --timerange <train_timerange>
-        │         └→ user_data/backtest_results/*.zip
-        │              └→ analyze_backtest_result.py → IS 指標
-        │
-        └─ test 節點（OOS 回測）
-             └→ freqtrade_backtest_executor.py
-                  --strategy <StrategyName>
-                  --timerange <val_timerange>
-                  └→ user_data/backtest_results/*.zip
-                       └→ analyze_backtest_result.py → OOS 指標
+implement_node（plugin.py）
+  └─ BACKTEST_MODE=real → _real_implement()
+       ├─ config_generator.py → config.json
+       ├─ backtest.py::run_backtest_is_oos()
+       │    ├─ freqtrade_runner.py → freqtrade backtesting（IS）→ is.zip
+       │    └─ freqtrade_runner.py → freqtrade backtesting（OOS）→ oos.zip
+       └─ result_parser.py → loop_N_*.json / loop_N_report.html
+
+freqtrade_cli.py（subprocess entry point，供 LLM 在 implement_node 中呼叫）
+  └─ import freqtrade_runner.py
+  └─ import result_parser.py
 ```
 
 #### 關鍵模組
 
 | 模組 | 位置 | 說明 |
 |------|------|------|
-| `freqtrade_backtest_executor.py` | `E:\code\binance\...\freqtrade\` | 呼叫 Freqtrade CLI（`freqtrade backtesting`），產出 `.zip` |
-| `cross_test_runner.py` | 同上 | IS/OOS 分割執行器；以 `train_timerange` + `val_timerange` 分別執行 |
-| `analyze_backtest_result.py` | 同上 | 解析 Freqtrade `.zip`，提取結構化指標 |
+| `config_generator.py` | `projects/quant_alpha/` | 從 `spec` dict 動態生成 `config.json`（pair、timeframe、exchange、fee） |
+| `freqtrade_runner.py` | `projects/quant_alpha/` | subprocess 封裝：呼叫 `freqtrade backtesting`，set-difference 偵測新 .zip；支援 retry（最多 3 次） |
+| `result_parser.py` | `projects/quant_alpha/` | 解析 `.zip`，生成 IS/OOS 指標 JSON + trades + signals + HTML 報告 |
+| `backtest.py` | `projects/quant_alpha/` | `run_backtest_is_oos(spec, plan, work_dir, userdir)` — 呼叫 runner 兩次（IS + OOS），回傳雙組指標 |
+| `freqtrade_cli.py` | `projects/quant_alpha/` | CLI entry point（`backtest` / `hyperopt` / `cross_test` subcommand），供 LLM subprocess 呼叫 |
 
-#### Freqtrade 回測指標（整合後可用）
+#### Freqtrade JSON 欄位對應（>= 2024.1）
 
-| 指標 | 對應欄位 | 說明 |
-|------|---------|------|
+| Freqtrade 欄位 | 系統欄位 | 說明 |
+|----------------|---------|------|
 | `winrate` | `win_rate` | 勝率 |
 | `profit_factor` | `profit_factor` | 總獲利 / 總虧損 |
 | `max_drawdown_account` | `max_drawdown` | 最大帳戶回撤 |
-| `profit_total_pct` | `total_return` | 總報酬率（%） |
-| `sharpe` | — | Sharpe Ratio（整合後新增評估） |
-| `sortino` | — | Sortino Ratio（整合後新增評估） |
-| `calmar` | — | Calmar Ratio（整合後新增評估） |
-| `trade_count` | `n_trades` | 交易次數 |
+| `profit_total × 100` | `profit_total_pct` | 總報酬率（%） |
+| `total_trades` | `n_trades` | 交易次數 |
 
-#### IS/OOS 評估升級（整合後）
+#### 錯誤處理
 
-analyze 節點收到 IS + OOS 雙組指標後：
-- 同時評估 IS 與 OOS 的 `win_rate`、`profit_factor`、`max_drawdown`
-- OOS 門檻可設定為 IS 門檻的 80%（保守驗證）
-- 防止過度擬合：IS PASS 但 OOS 大幅落差 → FAIL
-
-#### 整合所需程式碼變更
-
-| 檔案 | 變更說明 |
-|------|---------|
-| `projects/quant_alpha/plugin.py` | `implement_node` / `test_node` 改為呼叫 Freqtrade CLI |
-| `projects/quant_alpha/backtest.py` | 以 `freqtrade_backtest_executor.py` + `analyze_backtest_result.py` 取代 stub |
-| `framework/prompts/quant_alpha/analyze.txt` | 新增 IS/OOS 雙組指標變數（`{is_win_rate}`、`{oos_win_rate}` 等） |
-| `projects/quant_alpha/plugin.py`（analyze_node） | 傳入 IS/OOS 分組指標至 analyze prompt |
+| 情境 | 處理 |
+|------|------|
+| `freqtrade` 指令不存在 | `FileNotFoundError` → analyze 判定 TERMINATE |
+| returncode != 0 | `RuntimeError`（含 stderr 前 50 行）→ TERMINATE |
+| `.zip` 找不到或格式錯誤 | `ValueError` → TERMINATE |
+| spec 缺少 pair/timeframe | `KeyError` → config 生成 abort |
 
 ---
 

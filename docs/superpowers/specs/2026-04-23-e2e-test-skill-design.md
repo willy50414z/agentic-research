@@ -382,10 +382,71 @@ SKILL.md 中記錄的觸發說明：
 
 ## 不在此 skill 範圍內
 
-- 多輪研究迴圈測試（第一輪結束即完成）
+- ~~多輪研究迴圈測試（第一輪結束即完成）~~ — revise v2 pipeline 上線後須擴展為至少 `max_loops=2`，見下方驗證點
 - LLM 輸出品質評估（只驗證流程正確性與結構）
 - Planka board 初始化（前置條件：board 已由 `/init-planka-board` 建立）
 - 效能基準測試
+
+---
+
+## Revise v2 Pipeline 驗證點（max_loops=2 案例）
+
+當 `REVISE_PIPELINE_VERSION=v2` 啟用後，e2e-test 須將 `max_loops` 設為 2 並擴增以下斷言。這些驗證點是 `revise-pipeline-checklist-audit` change 的核心驗收條件之一。
+
+### V2-1 每輪策略 `.py` 為 byte-different
+
+跑完 `max_loops=2` 後，確認 `artifacts/strategies/v0/` 與 `artifacts/strategies/v1/` 各存在恰好一份 `.py` 檔，且兩份檔案 byte-different（用 `hashlib.sha256` 或 `cmp` 比對）。
+
+- 通過條件：`sha256(v0/{Strategy}.py) != sha256(v1/{Strategy}.py)`
+- 失敗常見根因：revise 階段沒真的重寫 `.py`、`shutil.copy2` 退回舊版本（即原始 bug）
+
+### V2-2 Backtest metrics 不同
+
+`v0` 與 `v1` 兩輪的 IS/OOS metrics（win_rate、profit_factor、max_drawdown 至少一項）數值不同。
+
+- 通過條件：`metrics(v0) != metrics(v1)`，比對 `loop_0` 與 `loop_1` 對應 JSON
+- 失敗常見根因：策略 `.py` 雖被重寫但執行參數未變更（檢查是否 deterministic check 漏抓）
+
+### V2-3 Planka audit 附件存在
+
+每輪 revise 完成後須有對應 audit markdown 上傳至 Planka：
+
+- `v0_audit.md`（baseline 不適用，跳過）
+- `v1_audit.md` 必存在
+- 若有 `v2`：`v2_audit.md` 必存在
+
+通過條件：每個有觸發 revise 的 iteration N，Planka 附件含 `v{N}_audit.md`。
+
+### V2-4 Staging 目錄保留
+
+確認 `artifacts/.staging/v{N}/` 在 TERMINATE 時保留（非 promote 時不被清理）。
+
+- 若任一輪 revise TERMINATE：對應 `artifacts/.staging/v{N}/` 仍存在 `candidate.py` 與 `audit_report_attempt_*.yaml`
+- 若全 revise APPROVED：staging 仍保留；正式路徑 `artifacts/strategies/v{N}/` 同時存在
+
+### V2-5 Per-iteration spec 與 direction 上傳
+
+每輪 revise 完成後，Planka 附件須含：
+
+- `v{N}_strategy_spec.md`（從通過 audit 的 `.py` 結構性萃取產出）
+- `v{N}_revised_direction.md`（Stage A intent APPROVED 後的最終文案）
+
+baseline 僅須 `v0_strategy_spec.md`（無 direction，因無 revise）。
+
+### V2-6 SKILL.md 與 design 同步
+
+`.ai/skills/e2e-test/SKILL.md` 若已建立，其 checklist 須涵蓋上述 V2-1 到 V2-5；若尚未建立，本設計文件作為驗證點的 canonical 來源，未來 SKILL.md 落地時須同步引入。
+
+### Progress.md 對應條目
+
+```markdown
+## Phase 6 — Revise v2 驗證（僅 max_loops>=2 啟用）
+- ✅/❌ V2-1 v0/v1 .py byte-different — sha256(v0)=..., sha256(v1)=...
+- ✅/❌ V2-2 v0/v1 backtest metrics 不同 — pf=A vs B, wr=C vs D
+- ✅/❌ V2-3 Planka 含 v1_audit.md（與 v2_audit.md if any）
+- ✅/❌ V2-4 staging 目錄保留 — 路徑: artifacts/.staging/v1/...
+- ✅/❌ V2-5 v0_strategy_spec.md / v1_strategy_spec.md / v1_revised_direction.md 上傳成功
+```
 
 ---
 
