@@ -36,20 +36,20 @@
 
 ## 3. revise_step 多階段 orchestrator 與三段獨立 retry counter
 
-- [ ] 3.1 在 `app/freqtrade/steps.py` 重寫 `revise_step`：改為 orchestrator，外層 dispatch 三個 retry counter (`intent_retry`、`checklist_retry`、`subagent_retry`) 與 dishonest counter
-- [ ] 3.2 實作 `_run_intent_stage(state) -> intent_path`：含 LLM1 ↔ LLM2 retry，使用 `intent_retry` counter；超過 2 次 raise `ReviseTerminate(reason="INTENT_RETRY_EXHAUSTED")`
-- [ ] 3.2a `_run_intent_stage` 於 Stage B APPROVED 後產出 `v{N}_revised_direction.md`（內容為核准版 intent 最終文案），並將其加入 artifacts 供 `_run_revise` 上傳 Planka
-- [ ] 3.3 實作 `_run_checklist_stage(intent_path) -> Checklist`：呼叫 LLM2 翻譯、parse + validate schema、強制 `locked=True`；schema 驗證失敗計入 `checklist_retry`，超過 raise `ReviseTerminate(reason="CHECKLIST_RETRY_EXHAUSTED")`
-- [ ] 3.3a `_run_checklist_stage` 每次成功產生 checklist 時，將其寫入 `artifacts/.staging/v{N}/checklist_attempt_{k}.yaml`；重產 checklist 時保留舊檔不覆寫
-- [ ] 3.4 實作 `_run_subagent_stage(checklist, old_py, staging_dir) -> tuple[candidate_path, completion_report]`：呼叫 subagent prompt，寫到 `artifacts/.staging/v{N}/candidate.py`
-- [ ] 3.4a `_run_subagent_stage` 將 subagent 回傳的 completion report 寫入 `artifacts/.staging/v{N}/completion_report_attempt_{k}.yaml`；retry 時保留舊檔不覆寫
-- [ ] 3.5 實作 `_run_audit_stage(checklist, candidate_py, old_py, completion_report) -> AuditReport`：呼叫 `audit.run_audit`
-- [ ] 3.6 實作分流邏輯：依 `cross_check` 結果與 audit overall/reject_summary 決定路由（UNIMPLEMENTABLE_CHECKLIST → Stage C；IMPLEMENTATION_FAILED → Stage D；CHECKLIST_AMBIGUOUS → Stage C 但帶 LLM3 INSUFFICIENT 訊息）
-- [ ] 3.7 實作獨立 counter 邏輯：UNIMPLEMENTABLE_CHECKLIST 與 CHECKLIST_AMBIGUOUS 兩條路徑都計入 `checklist_retry`；IMPLEMENTATION_FAILED 計入 `subagent_retry`；新 checklist 產生時 `subagent_retry` 歸零
-- [ ] 3.8 實作 dishonest counter：每次 audit 計算 deterministic_results + llm3_results **合計**`subagent_self_report_consistent: false` 的 item 數量（涵蓋雙層）；該輪有至少一個 false 即 mark 為 `dishonest_attempt`；連續兩輪 `dishonest_attempt` 直接 raise `ReviseTerminate(reason="SUBAGENT_DISHONEST")`；checklist 變更時歸零連續性
-- [ ] 3.9 實作 promote 動作：audit `overall: APPROVED` 時 atomic move/copy `artifacts/.staging/v{N}/candidate.py` → `artifacts/strategies/v{N}/{StrategyName}.py`；partial 失敗視為 promote 失敗 TERMINATE
-- [ ] 3.10 實作 TERMINATE 路徑：任一 counter 超 2 次或 LLM 不可用 → 寫 `v{N}_audit.md`（含三 counter 歷史）、保留 staging 不清理、回 `{"last_result": "TERMINATE", "last_reason": ...}`、`plan.strategy_file` 維持指向 v{N-1}
-- [ ] 3.11 移除 `revise_step` 中的 rule-based fallback（包含現有 stoploss tighten 邏輯）；rule-based fallback 僅在 v1 流程保留
+- [x] 3.1 在 `app/freqtrade/steps/revise/v2.py` 重寫 `revise_step` (as `revise_step_v2`)：改為 orchestrator，外層 dispatch 三個 retry counter (`intent_retry`、`checklist_retry`、`subagent_retry`) 與 dishonest counter
+- [x] 3.2 實作 `_stage_a_intent` + `_stage_b_audit_intent`：含 LLM1 ↔ LLM2 retry，使用 `intent_retry` counter；超過 2 次 raise `ReviseTerminate(reason="INTENT_RETRY_EXHAUSTED")`
+- [x] 3.2a `_write_revised_direction` 於 Stage B APPROVED 後產出 `v{N}_revised_direction.md`（內容為核准版 intent 最終文案），並將其加入 artifacts 供 `_run_revise` 上傳 Planka
+- [x] 3.3 實作 `_stage_c_checklist`：呼叫 LLM2 翻譯、`parse_checklist` validate schema、強制 `locked=True`；schema 驗證失敗計入 `checklist_retry`，超過 raise `ReviseTerminate(reason="CHECKLIST_RETRY_EXHAUSTED")`
+- [x] 3.3a `_stage_c_checklist` 每次成功產生 checklist 時，將其寫入 `artifacts/.staging/v{N}/checklist_attempt_{k}.yaml`；重產 checklist 時保留舊檔不覆寫
+- [x] 3.4 實作 `_stage_d_subagent`：呼叫 subagent prompt，寫到 `artifacts/.staging/v{N}/candidate.py`
+- [x] 3.4a `_stage_d_subagent` 將 subagent 回傳的 completion report 寫入 `artifacts/.staging/v{N}/completion_report_attempt_{k}.yaml`；retry 時保留舊檔不覆寫
+- [x] 3.5 實作 `_stage_e_audit`：呼叫 `audit.run_audit`，並透過 `write_audit_report` 寫 audit_report_attempt_{k}.yaml
+- [x] 3.6 實作分流邏輯：依 `cross_check` 結果與 `AuditReport.should_route_to_stage_c()` 決定路由（UNIMPLEMENTABLE_CHECKLIST → Stage C；IMPLEMENTATION_FAILED → Stage D；CHECKLIST_AMBIGUOUS → Stage C 但帶 LLM3 INSUFFICIENT 訊息）
+- [x] 3.7 實作獨立 counter 邏輯：UNIMPLEMENTABLE_CHECKLIST 與 CHECKLIST_AMBIGUOUS 兩條路徑都計入 `checklist_retry`；IMPLEMENTATION_FAILED 計入 `subagent_retry`；新 checklist 產生時 `subagent_retry` 歸零
+- [x] 3.8 實作 dishonest counter：每次 audit 計算 deterministic_results + llm3_results **合計**`subagent_self_report_consistent: false` 的 item 數量（涵蓋雙層）；該輪有至少一個 false 即 mark 為 `dishonest_attempt`；連續兩輪 `dishonest_attempt` 直接 raise `ReviseTerminate(reason="SUBAGENT_DISHONEST")`；checklist 變更時歸零連續性
+- [x] 3.9 實作 `_promote`：audit `overall: APPROVED` 時 atomic copy + os.replace `artifacts/.staging/v{N}/candidate.py` → `artifacts/strategies/v{N}/{StrategyName}.py`；partial 失敗視為 promote 失敗 TERMINATE
+- [x] 3.10 實作 TERMINATE 路徑：任一 counter 超 2 次或 LLM 不可用 → `_write_audit_log_md` 寫 `v{N}_audit.md`（含三 counter 歷史）、保留 staging 不清理、回 `{"last_result": "TERMINATE", "last_reason": ...}`、`plan.strategy_file` 維持指向 v{N-1}
+- [x] 3.11 v2 流程不含 rule-based fallback（LLM 不可用直接 TERMINATE）；舊 `revise.txt` + `revise_validate.txt` rule-based fallback 仍保留於 `revise/v1.py`
 
 ## 4. 每輪獨立 strategy `.py`、staging path、spec 快照
 
