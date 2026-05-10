@@ -622,4 +622,33 @@ rm -rf artifacts/strategies/ artifacts/*.json artifacts/*.txt artifacts/*.md
 | P3 Research Loop | 11 | 0 | 0 | 11 |
 | P4 Final Review | 5 | 0 | 0 | 5 |
 | TODO A Freqtrade | 3 | 0 | 0 | 3 |
-| **合計** | **35** | **0** | **0** | **35** |
+| R Revise v2 Pipeline | 8 | 0 | 0 | 8 |
+| **合計** | **43** | **0** | **0** | **43** |
+
+---
+
+## R — Revise v2 Pipeline 手動 E2E 驗證
+
+對應 change `revise-pipeline-checklist-audit`。在切換 `REVISE_PIPELINE_VERSION=v2` 後，於測試 project 跑完一輪 max_loops=2 的端到端流程並驗證下列項目。
+
+| 項目 | 說明 | 操作 / 預期 | 狀態 |
+|------|------|-------------|------|
+| R1 | flag 啟用 | 確認 dispatch 時 log 出 `revise_pipeline_version=v2` 並寫入 `projects.config.revise_pipeline_version` | ⬜ |
+| R2 | v0 / v1 `.py` 為不同檔案 | `diff artifacts/strategies/v0/{Name}.py artifacts/strategies/v1/{Name}.py` 應有差異（非 byte-identical） | ⬜ |
+| R3 | v0 與 v1 backtest metrics 不同 | 比對 IS/OOS profit_factor、win_rate、max_drawdown — 若三項皆相同代表參數沒生效，這正是上次 bug 的特徵 | ⬜ |
+| R4 | Planka 附件齊全（per iteration） | 每輪應出現 `v{N}_revised_direction.md`、`v{N}_audit.md`、`v{N}_strategy_spec.md`、`v{N}_backtest.zip`；不應出現獨立的 `v{N}_is.zip` 或 `v{N}_oos.zip`（已被 §7 過濾） | ⬜ |
+| R5 | staging 目錄保留 | TERMINATE 時 `artifacts/.staging/v{N}/` 應保留 candidate.py、所有 `*_attempt_{k}.yaml`；APPROVED 時可清理但 `artifacts/strategies/v{N}/` 必須存在 | ⬜ |
+| R6 | TERMINATE 路徑上傳 audit log | 強制觸發 TERMINATE（例如三次連續 dishonest），確認 `v{N}_audit.md` 被上傳至 Planka 卡片，內容含 retry counters 與 final_verdict | ⬜ |
+| R7 | strategy_spec 與 .py 一致 | 開啟 Planka 附件 `v{N}_strategy_spec.md`，比對結構性區段所列 stoploss / hyperopt default / minimal_roi 與實際 `.py` AST 萃取一致；LLM 補充區段不得污染結構性區段 | ⬜ |
+| R8 | freqtrade 用正確路徑 | `freqtrade backtesting` 的 `--strategy-path` 應指向 `artifacts/strategies/v{N}/`，絕不可指向 `artifacts/.staging/`；如為前者，backtest.py 已加 `ValueError` 防呆 | ⬜ |
+
+### 觸發 TERMINATE 的常用手法（給 R6）
+
+- 將 `revise_intent_audit.txt` 暫時改成永遠回 `REJECTED` → `INTENT_RETRY_EXHAUSTED`
+- 將 subagent prompt 暫時改成永遠 self-report `completed: true` 但只複製舊 .py → `SUBAGENT_DISHONEST`
+- 設定無效的 LLM target → `STAGE_*_LLM_FAILED`
+
+### 對應自動測試
+
+- 單元層：`tests/test_audit.py`、`tests/test_strategy_extractor.py`、`tests/test_strategy_snapshot.py`、`tests/test_revise_v2.py`
+- 整合層：`tests/test_revise_pipeline.py`（透過 `_run_revise` 驅動 v2，驗證 workflow_step 轉換與 Planka 上傳）

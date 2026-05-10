@@ -421,10 +421,17 @@ def _run_revise(
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
     logger.info("[revise] START  project='%s'", project_id)
+    prev_artifact_paths = {a.get("path") for a in state.get("artifacts", [])}
     updates = revise_step(state)
+    new_artifacts = updates.get("artifacts", [])
 
     if updates.get("last_result") == "TERMINATE":
         _merge_state(project_id, updates, db_url)
+        # Upload diagnostic artifacts produced by the TERMINATE path
+        # (v{N}_audit.md, partial revised_direction.md if Stage A succeeded)
+        # so reviewers can inspect failure mode in Planka.
+        if sink:
+            _upload_new_artifacts(project_id, new_artifacts, prev_artifact_paths, sink)
         set_workflow_step(project_id, WorkflowStep.TERMINATE, db_url)
         logger.info("[revise] TERMINATE signal from revise_step  project='%s'", project_id)
         return
@@ -432,21 +439,10 @@ def _run_revise(
     _merge_state(project_id, updates, db_url)
 
     if sink:
-        attempt = state.get("analyze_attempt", 0)
-        direction_art = next(
-            (a for a in reversed(updates.get("artifacts", []))
-             if a.get("type") == "revised_direction"),
-            None,
-        )
-        if direction_art:
-            p = Path(direction_art["path"])
-            card_id = sink.resolve_card_id(project_id)
-            if card_id and p.exists():
-                try:
-                    sink.upload_spec_attachment(card_id, p.name, p.read_text(encoding="utf-8"))
-                    logger.info("[revise] uploaded '%s'  project='%s'", p.name, project_id)
-                except Exception as e:
-                    logger.warning("[revise] upload '%s' failed: %s", p.name, e)
+        # Upload all new artifacts (revised_direction, audit, strategy_spec).
+        # The §7 filter in _upload_new_artifacts skips bundled-backtest types
+        # but lets these markdown-class artifacts pass through.
+        _upload_new_artifacts(project_id, new_artifacts, prev_artifact_paths, sink)
 
     set_workflow_step(project_id, WorkflowStep.IMPLEMENT, db_url)
     logger.info("[revise] DONE → implement  project='%s'", project_id)

@@ -89,11 +89,11 @@
 
 ## 8. 整合測試與驗證
 
-- [ ] 8.1 在 `tests/freqtrade/test_revise_pipeline.py` 撰寫端到端 mock test：mock LLM responses 走完 intent → audit → checklist → subagent → audit 全流程，驗證 retry 邊界
-- [ ] 8.2 撰寫 mock test 覆蓋 SUBAGENT_DISHONEST 連續兩次 → TERMINATE 路徑
-- [ ] 8.3 撰寫 mock test 覆蓋 deterministic check FAIL → subagent 重寫 → PASS 路徑
-- [ ] 8.4 撰寫 mock test 覆蓋 LLM 不可用 → TERMINATE 路徑（不再有 rule-based fallback）
-- [ ] 8.5 在 `docs/DEV_CHECKLIST.md` 新增/更新本 change 的手動 E2E 驗證步驟（max_loops=2、確認 v0/v1 `.py` 不同、確認 backtest metrics 不同、確認 Planka 附件清單符合預期、確認 staging 保留與 `v{N}_audit.md` 上傳）
+- [x] 8.1 在 `tests/test_revise_pipeline.py` 撰寫端到端 mock test：透過 `_run_revise` 驅動 v2 全流程（intent → audit → checklist → subagent → audit），驗證 workflow_step 轉換為 IMPLEMENT 與三類 markdown artifact 上傳
+- [x] 8.2 撰寫 mock test 覆蓋 SUBAGENT_DISHONEST 連續兩次 → TERMINATE 路徑（workflow_step → terminate；audit log 仍上傳）
+- [x] 8.3 撰寫 mock test 覆蓋 deterministic check FAIL → subagent 重寫 → PASS 路徑（promoted strategy_file 指向 v1/，非 staging）
+- [x] 8.4 撰寫 mock test 覆蓋 LLM 不可用 → TERMINATE 路徑（不再有 rule-based fallback；strategy_file 維持 v0）
+- [x] 8.5 在 `docs/DEV_CHECKLIST.md` 新增 R 區段（8 個項目）：max_loops=2、v0/v1 `.py` 不同、backtest metrics 不同、Planka 附件清單、staging 保留、TERMINATE audit 上傳、strategy_spec 與 .py 一致、freqtrade 路徑防呆
 
 ## 9. 文件與 migration
 
