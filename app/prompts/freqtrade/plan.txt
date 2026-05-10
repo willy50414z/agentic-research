@@ -1,0 +1,154 @@
+你是 Freqtrade 量化策略實作 agent。請嚴格依照以下已審查完成的研究規格，撰寫完整的 Freqtrade 策略 Python 程式碼。
+
+⚠️ 強制約束（最高優先，違反即為錯誤）：
+- 策略程式碼中的 `timeframe` **必須等於** `{TIMEFRAME}`，禁止使用其他值。
+- 策略邏輯（指標週期、進出場條件、startup_candle_count）必須適配此 timeframe 的 K 線特性。
+- `order_types` **必須包含以下四個鍵**，缺少任一鍵 Freqtrade 會在載入時拋出 `ImportError`：
+  ```python
+  order_types = {{
+      "entry": "market",       # 或 "limit"，依規格決定
+      "exit": "market",        # 或 "limit"，依規格決定
+      "stoploss": "market",
+      "stoploss_on_exchange": False,
+  }}
+  ```
+
+## 研究規格
+
+{SPEC}
+
+## 本輪資訊
+
+Loop 編號：{loop_index}
+上一輪決策：{last_decision}
+
+---
+
+## 任務
+
+依照規格中的進出場訊號、指標參數、停損、手續費假設，撰寫一個可直接執行的 Freqtrade 策略類別。
+
+策略類別的標準結構如下（以 RSI 策略為例，請依規格調整）：
+
+```python
+from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
+import talib.abstract as ta
+import pandas as pd
+from pandas import DataFrame
+
+
+class StrategyName(IStrategy):
+    """
+    策略說明（一行摘要）
+    依照 spec 的市場論點撰寫
+    """
+
+    timeframe = "{TIMEFRAME}"  # ⚠️ 必須完全符合規格的時間週期，禁止自行更改
+    stoploss  = -0.05          # 來自規格的停損（負數）
+    minimal_roi = {{"0": 0.10}} # 來自規格的停利目標；若規格無明確 ROI，可設定保守值
+
+    order_types = {{            # ⚠️ 四個鍵缺一不可，否則 Freqtrade 載入時會 ImportError
+        "entry": "market",
+        "exit": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": False,
+    }}
+
+    # 可優化參數（來自規格的指標數值）
+    rsi_period   = IntParameter(10, 20, default=14, space="buy", optimize=True)
+    rsi_buy      = DecimalParameter(25, 40, default=35, decimals=1, space="buy", optimize=True)
+    rsi_sell     = DecimalParameter(60, 80, default=70, decimals=1, space="sell", optimize=True)
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe["rsi"] = ta.RSI(dataframe, timeperiod=self.rsi_period.value)
+        return dataframe
+
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[
+            (
+                (dataframe["rsi"].shift(1) < self.rsi_buy.value) &
+                (dataframe["rsi"] >= self.rsi_buy.value) &
+                (dataframe["volume"] > 0)
+            ),
+            "enter_long",
+        ] = 1
+        return dataframe
+
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[
+            (
+                (dataframe["rsi"] > self.rsi_sell.value) &
+                (dataframe["volume"] > 0)
+            ),
+            "exit_long",
+        ] = 1
+        return dataframe
+```
+
+## 輸出
+
+**第一步**：用工具將完整的 Freqtrade 策略類別寫入：
+`{STRATEGY_DIR}/{{strategy_name}}.py`
+
+類別名稱必須與檔名一致（CamelCase），且須與規格中的策略邏輯完全對應。
+
+**第二步（必做，不可略過）**：寫完 `.py` 後立刻在 shell 用 Python 驗證它能 import，**任何 SyntaxError / NameError / ImportError 都必須先修好再進下一步**。
+
+跑這段（Windows 與 POSIX 皆可，把 `<dir>` / `<name>` 換成實際值）：
+
+```bash
+python -c "import sys, importlib.util; spec = importlib.util.spec_from_file_location('<name>', r'<dir>/<name>.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print('ok')"
+```
+
+- 看到 `ok` → 才能進第三步
+- 看到 `NameError: name 'datetime' is not defined` 之類 → 補對應 import（`from datetime import datetime`），重寫 `.py`，再驗一次
+- 看到 `SyntaxError` → 修語法，再驗一次
+- 看到 `ImportError: cannot import name X from freqtrade...` → 改成 freqtrade 真的有的 API，再驗一次
+
+**常見會漏的 imports（檢查清單）**：
+
+| 你用了 | 必須 import |
+|---|---|
+| `datetime` 型別註解或 `datetime.now()` | `from datetime import datetime` |
+| `Trade` 型別註解（callback 參數） | `from freqtrade.persistence import Trade` |
+| `Optional[X]`、`Union[...]` 等 typing | `from typing import Optional, Union` |
+| `np.X` | `import numpy as np` |
+| `qtpylib.X` | `import freqtrade.vendor.qtpylib.indicators as qtpylib` |
+| `informative` decorator | `from freqtrade.strategy import informative` |
+
+**第三步**：用工具將以下元資料 JSON 寫入 `{OUTPUT_DIR}/plan_output.json`：
+
+```json
+{{
+  "strategy_name": "類別名稱（與 .py 檔名一致）",
+  "strategy_file": "{STRATEGY_DIR}/{{strategy_name}}.py",
+  "timeframe": "{TIMEFRAME}",
+  "stoploss": 停損數值（負數浮點數）,
+  "run_mode": "backtest",
+  "parameters": {{
+    "各指標參數預設值": "值"
+  }},
+  "config_overrides": {{
+    // 策略需要覆寫的 Freqtrade config 欄位（可省略不需要的）
+    // 範例：使用 market order 時必須加入：
+    // "entry_pricing": {{"price_side": "other"}},
+    // "exit_pricing":  {{"price_side": "other"}}
+    // 若策略使用 limit order，可省略此欄位或填入 {{}}
+  }},
+  "_reason": "本輪與上一輪的差異，或首輪說明策略依據"
+}}
+```
+
+`config_overrides` 規則：
+- 使用 **market order**（`order_types.entry/exit = "market"`）時，必須加入：
+  ```json
+  "entry_pricing": {{"price_side": "other"}},
+  "exit_pricing":  {{"price_side": "other"}}
+  ```
+- 使用 **limit order** 時可省略，系統預設值為 `"other"`（相容兩種 order type）。
+- 可覆寫任何 Freqtrade config 頂層欄位（例如 `max_open_trades`、`trading_mode` 等）。
+
+注意 `run_mode`：
+- `"backtest"` — 標準 IS/OOS 雙組回測（預設，也是此 TODO A 階段唯一支援的模式）
+- `"hyperopt"` — 後續 TODO B 支援
+- `"cross_test"` — 後續 TODO B 支援

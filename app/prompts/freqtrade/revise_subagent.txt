@@ -54,7 +54,36 @@ audit 階段會用「未授權變更檢查」確認你只改了 checklist 授權
 - 新 .py 必須語法正確（`ast.parse` 過得了）
 - 不允許 look-ahead bias：禁止用 `.shift(-N)` 等未來窺探
 
-## 第二步：寫 completion_report.yaml
+## 第二步（必做，不可略過）：驗證新 `.py` 能 import
+
+寫完 `.py` 後立刻在 shell 用 Python 驗證它能 import，**任何 SyntaxError / NameError / ImportError 都必須先修好再進下一步**。
+
+跑這段（把 `<path>` 換成 `{CANDIDATE_PY_PATH}` 的實際值，`<name>` 換成 strategy 類別名）：
+
+```bash
+python -c "import sys, importlib.util; spec = importlib.util.spec_from_file_location('<name>', r'<path>'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print('ok')"
+```
+
+- 看到 `ok` → 才能進第三步
+- 看到 `NameError: name 'datetime' is not defined` 之類 → 補對應 import，重寫 `.py`，再驗一次
+- 看到 `SyntaxError` → 修語法，再驗一次
+- 看到 `ImportError: cannot import name X from freqtrade...` → 改成 freqtrade 真的有的 API，再驗一次
+
+**注意**：補 import 是「imports 區塊」的修改，屬於授權範圍（spec D14），不算 unauthorized_change。但你補完後仍要符合 checklist，不要趁機改其他東西。
+
+**常見會漏的 imports（檢查清單）**：
+
+| 你用了 | 必須 import |
+|---|---|
+| `datetime` 型別註解或 `datetime.now()` | `from datetime import datetime` |
+| `Trade` 型別註解（callback 參數） | `from freqtrade.persistence import Trade` |
+| `Optional[X]`、`Union[...]` 等 typing | `from typing import Optional, Union` |
+| `np.X` | `import numpy as np` |
+| `qtpylib.X` | `import freqtrade.vendor.qtpylib.indicators as qtpylib` |
+
+如果驗證連續 3 次都失敗（例如你不知道 freqtrade 某個 API 怎麼用），**不要硬寫**——在 completion_report.yaml 把卡住的 item 加入 `unimplementable_items`、填 `blocking_reason`，由系統退回 Stage C 重產 checklist。
+
+## 第三步：寫 completion_report.yaml
 
 用工具將以下 YAML 寫入 `{COMPLETION_REPORT_PATH}`：
 
