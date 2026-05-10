@@ -104,10 +104,10 @@
 
 ## 10. Feature flag 與 rollout
 
-- [ ] 10.1 在 `app/workflow/executing_step.py` 或 `app/freqtrade/steps.py` 入口讀取 `REVISE_PIPELINE_VERSION`，預設 `v1`，非法值 fallback `v1` + log warning
-- [ ] 10.2 dispatch 第一次進入 revise 時將決定的版本寫入 `projects.config.revise_pipeline_version`，後續輪次以該欄位為準（避免中途切換）
-- [ ] 10.3 v1 路徑保留現有 `revise.txt` + `revise_validate.txt` 流程；v2 路徑走 task 3 的新 orchestrator
-- [ ] 10.4 加 test 覆蓋三種 flag scenario：未設值 → v1；顯式 v2 → 走新流程；project 已有 v2 記錄 + flag 改 v1 → 仍走 v2
+- [x] 10.1 在 `app/workflow/executing_step.py` 或 `app/freqtrade/steps.py` 入口讀取 `REVISE_PIPELINE_VERSION`，預設 `v1`，非法值 fallback `v1` + log warning
+- [x] 10.2 dispatch 第一次進入 revise 時將決定的版本寫入 `projects.config.revise_pipeline_version`，後續輪次以該欄位為準（避免中途切換）
+- [x] 10.3 v1 路徑保留現有 `revise.txt` + `revise_validate.txt` 流程；v2 路徑走 task 3 的新 orchestrator
+- [x] 10.4 加 test 覆蓋三種 flag scenario：未設值 → v1；顯式 v2 → 走新流程；project 已有 v2 記錄 + flag 改 v1 → 仍走 v2
 - [ ] 10.5 在測試 project 設 `REVISE_PIPELINE_VERSION=v2` 跑完整 `max_loops=2` 迴圈，驗證 v0/v1 backtest metrics 不同（核心驗收條件）
 - [ ] 10.6 觀察 1~2 個 production project 完整跑完，確認沒有高頻 SUBAGENT_DISHONEST、無 promote 半成品錯誤
 - [ ] 10.7 將 flag 預設改為 v2（修改 default 值並更新文件）；保留 v1 程式碼路徑至少一個 release

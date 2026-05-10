@@ -377,23 +377,32 @@ def _build_state(project: dict) -> dict:
         "[_build_state] max_loops cfg_raw=%r resolved=%d  project='%s'",
         cfg_max_loops_raw, max_loops, project.get("id"),
     )
+    # Surface the locked revise_pipeline_version (if any) into state so
+    # `_run_revise` can detect "already locked" without a separate DB read,
+    # and so revise_step's _resolve_version honours the project lock.
+    revise_pipeline_version = cfg.get("revise_pipeline_version")
+    logger.info(
+        "[_build_state] revise_pipeline_version=%r",
+        revise_pipeline_version,
+    )
     return {
-        "project_id":           project["id"],
-        "loop_index":           cfg.get("loop_index", 0),
-        "loop_goal":            spec.get("hypothesis") or project.get("goal") or "research",
-        "spec":                 spec,
-        "implementation_plan":  cfg.get("implementation_plan"),
-        "last_result":          cfg.get("last_result", AnalysisResult.UNKNOWN),
-        "last_reason":          cfg.get("last_reason", ""),
-        "max_loops":            max_loops,
-        "analyze_attempt":      cfg.get("analyze_attempt", 0),
-        "needs_human_approval": False,
-        "attempt_count":        cfg.get("attempt_count", 0),
-        "paused_at":            cfg.get("paused_at"),
-        "is_metrics":           cfg.get("is_metrics", {}),
-        "oos_metrics":          cfg.get("oos_metrics", {}),
-        "test_metrics":         cfg.get("test_metrics", {}),
-        "artifacts":            cfg.get("artifacts", []),
+        "project_id":             project["id"],
+        "loop_index":             cfg.get("loop_index", 0),
+        "loop_goal":              spec.get("hypothesis") or project.get("goal") or "research",
+        "spec":                   spec,
+        "implementation_plan":    cfg.get("implementation_plan"),
+        "last_result":            cfg.get("last_result", AnalysisResult.UNKNOWN),
+        "last_reason":            cfg.get("last_reason", ""),
+        "max_loops":              max_loops,
+        "analyze_attempt":        cfg.get("analyze_attempt", 0),
+        "needs_human_approval":   False,
+        "attempt_count":          cfg.get("attempt_count", 0),
+        "paused_at":              cfg.get("paused_at"),
+        "is_metrics":             cfg.get("is_metrics", {}),
+        "oos_metrics":            cfg.get("oos_metrics", {}),
+        "test_metrics":           cfg.get("test_metrics", {}),
+        "artifacts":              cfg.get("artifacts", []),
+        "revise_pipeline_version": revise_pipeline_version,
     }
 
 
@@ -421,6 +430,32 @@ def _run_revise(
     db_url: str | None = None, sink: WorkflowSink | None = None, move_card_fn: MoveCardFn = None,
 ) -> None:
     logger.info("[revise] START  project='%s'", project_id)
+
+    # §10.1 / §10.2 — Resolve and lock REVISE_PIPELINE_VERSION on first revise entry.
+    # Per spec `fail-path-revise-plan` and design D12: a project's revise rounds
+    # must use a single pipeline version for its entire lifetime. The first time
+    # we dispatch revise for this project (no value in state, hence none in DB),
+    # we read the env var, normalise it, persist it via merge_config, and
+    # propagate it into the in-flight state so revise_step picks it up. If the
+    # state already has a value, the lock wins regardless of the current env var.
+    if state.get("revise_pipeline_version") is None:
+        from app.freqtrade.steps.revise import _resolve_version
+        # Detect non-empty invalid env values for the warning the spec requires.
+        raw_env = os.getenv("REVISE_PIPELINE_VERSION")
+        if raw_env and raw_env not in ("v1", "v2"):
+            logger.warning(
+                "[revise] REVISE_PIPELINE_VERSION=%r is invalid; falling back to v1",
+                raw_env,
+            )
+        # _resolve_version already handles unset/invalid → "v1" with warning.
+        resolved = _resolve_version(state)
+        merge_config(project_id, {"revise_pipeline_version": resolved}, db_url)
+        state["revise_pipeline_version"] = resolved
+        logger.info(
+            "[revise] flag resolved=%s, locked into project config",
+            resolved,
+        )
+
     prev_artifact_paths = {a.get("path") for a in state.get("artifacts", [])}
     updates = revise_step(state)
     new_artifacts = updates.get("artifacts", [])
