@@ -36,6 +36,12 @@ def run_backtest_is_oos(
         raise ValueError(f"implementation_plan missing 'strategy_name': {plan}")
     strategy_file = plan.get("strategy_file")
     if strategy_file:
+        if not Path(strategy_file).exists():
+            raise FileNotFoundError(
+                f"strategy_file '{strategy_file}' does not exist on disk; "
+                "plan_step LLM may have failed to write the .py — "
+                "check LLM_FREQTRADE_STEPS in .env and review plan_step logs"
+            )
         strategy_dir = str(Path(strategy_file).parent)
         # Defensive: per per-iteration-strategy-snapshot spec, freqtrade SHALL
         # never read from artifacts/.staging — that path holds non-promoted

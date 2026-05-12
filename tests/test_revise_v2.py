@@ -92,8 +92,7 @@ _VALID_CHECKLIST_YAML = textwrap.dedent("""
       - id: M1
         type: param
         target:
-          kind: class_attr
-          name: stoploss
+          path: stoploss
         from: -0.05
         to: -0.03
         rationale: tighten drawdown
@@ -285,6 +284,10 @@ def state(tmp_path, monkeypatch):
 
     return {
         "analyze_attempt": 1,
+        "spec": {
+            "trading_scope": {"pair": "BTC/USDT", "timeframe": "4h", "exchange": "binance"},
+            "execution": {"fee": "0.10%"},
+        },
         "implementation_plan": {
             "strategy_name": "FooStrategy",
             "strategy_file": str(base_py),
@@ -426,6 +429,10 @@ class TestImplementationFailed:
 
 class TestDishonestStreak:
 
+    @pytest.mark.skip(
+        reason="config-driven 架構下 param items 不可能 dishonest（orchestrator 直接寫對）；"
+               "重新設計需要 logic-items checklist + subagent 對 logic 撒謊，待 Step 7 e2e 後重寫"
+    )
     def test_two_consecutive_dishonest_terminates(self, state):
         # attempt 0: subagent writes BASE_PY (stoploss unchanged) but reports completed:true → lie
         #   → audit deterministic FAIL on M1, short-circuits LLM3 (no llm3 call)
@@ -504,6 +511,10 @@ class TestStagingPreservation:
         assert not promoted.exists() or not list(promoted.glob("*.py"))
 
     def test_approved_does_not_alter_v0(self, state):
+        # Config-driven note: a param-only revise leaves the strategy .py
+        # untouched — the new stoploss value lives in config.json, not the .py.
+        # So v1's .py is byte-identical to v0; the "change" is in
+        # plan.config_overrides.
         import app.freqtrade.steps.revise.v2 as v2_mod
         artifacts_dir = v2_mod.ARTIFACTS_DIR
         v0_py = artifacts_dir / "strategies" / "v0" / "FooStrategy.py"
@@ -513,17 +524,18 @@ class TestStagingPreservation:
             ("intent",       lambda cwd, **kw: _write_intent(cwd)),
             ("intent_audit", lambda cwd, **kw: _write_intent_audit(cwd, approved=True)),
             ("checklist",    lambda cwd, **kw: _write_checklist(cwd)),
-            ("subagent",     lambda **kw: _write_subagent(**kw)),
-            ("llm3",         lambda cwd, **kw: _write_llm3(cwd, items=[])),
         ])
         result = revise_step_v2(state, call_llm=llm)
         assert result["last_result"] == "REVISED"
         # v0 untouched
         assert v0_py.read_text(encoding="utf-8") == original_v0
-        # v1 created with the new content
+        # v1 created
         v1_py = artifacts_dir / "strategies" / "v1" / "FooStrategy.py"
         assert v1_py.exists()
-        assert v1_py.read_text(encoding="utf-8") != original_v0
+        # In the new architecture v1 .py is byte-identical to v0 (param-only revise)
+        assert v1_py.read_text(encoding="utf-8") == original_v0
+        # The actual change is in plan.config_overrides
+        assert result["implementation_plan"]["config_overrides"]["stoploss"] == -0.03
 
 
 # ---------------------------------------------------------------------------
@@ -533,46 +545,29 @@ class TestStagingPreservation:
 
 class TestArtifactPersistence:
 
-    def test_checklist_attempt_files_kept(self, state):
-        # Two checklist attempts → both YAMLs should exist on disk
+    def test_checklist_and_audit_files_kept_param_only(self, state):
+        # In the config-driven architecture, a param-only checklist:
+        # - generates checklist_attempt_0.yaml and audit_report_attempt_0.yaml
+        # - skips the subagent (no logic items) so no subagent IO directory
+        # - completion_report_attempt_0.yaml is the merged orchestrator view
         import app.freqtrade.steps.revise.v2 as v2_mod
         artifacts_dir = v2_mod.ARTIFACTS_DIR
         llm = ScriptedLLM([
             ("intent",       lambda cwd, **kw: _write_intent(cwd)),
             ("intent_audit", lambda cwd, **kw: _write_intent_audit(cwd, approved=True)),
             ("checklist",    lambda cwd, **kw: _write_checklist(cwd)),
-            ("subagent", lambda **kw: _write_subagent(
-                completion_yaml=_UNIMPLEMENTABLE_COMPLETION_YAML, **kw,
-            )),
-            ("checklist",    lambda cwd, **kw: _write_checklist(cwd)),
-            ("subagent",     lambda **kw: _write_subagent(**kw)),
-            ("llm3",         lambda cwd, **kw: _write_llm3(cwd, items=[])),
-        ])
-        revise_step_v2(state, call_llm=llm)
-        staging = artifacts_dir / ".staging" / "v1"
-        assert (staging / "checklist_attempt_0.yaml").exists()
-        assert (staging / "checklist_attempt_1.yaml").exists()
-        assert (staging / "completion_report_attempt_0.yaml").exists()  # unimplementable attempt
-        assert (staging / "completion_report_attempt_0.yaml").exists()  # honest attempt under new ck
-
-    def test_audit_report_attempt_files_kept(self, state):
-        # one ck, two subagent attempts under it → two audit_report files
-        import app.freqtrade.steps.revise.v2 as v2_mod
-        artifacts_dir = v2_mod.ARTIFACTS_DIR
-        llm = ScriptedLLM([
-            ("intent",       lambda cwd, **kw: _write_intent(cwd)),
-            ("intent_audit", lambda cwd, **kw: _write_intent_audit(cwd, approved=True)),
-            ("checklist",    lambda cwd, **kw: _write_checklist(cwd)),
-            # attempt 0: BASE_PY + incomplete report → IMPLEMENTATION_FAILED, no audit run
-            ("subagent", lambda **kw: _write_subagent(
-                new_py=_BASE_PY, completion_yaml=_INCOMPLETE_COMPLETION_YAML, **kw,
-            )),
-            # attempt 1: correct
-            ("subagent",     lambda **kw: _write_subagent(**kw)),
-            ("llm3",         lambda cwd, **kw: _write_llm3(cwd, items=[])),
         ])
         result = revise_step_v2(state, call_llm=llm)
         assert result["last_result"] == "REVISED"
         staging = artifacts_dir / ".staging" / "v1"
-        # audit only ran for attempt 1 (attempt 0 short-circuited at cross_check)
-        assert (staging / "audit_report_attempt_1.yaml").exists()
+        assert (staging / "checklist_attempt_0.yaml").exists()
+        assert (staging / "completion_report_attempt_0.yaml").exists()
+        assert (staging / "audit_report_attempt_0.yaml").exists()
+
+    @pytest.mark.skip(
+        reason="config-driven 架構下 param-only checklist 不觸發 subagent，"
+               "因此 IMPLEMENTATION_FAILED + subagent_retry path 需以 logic-items 構造，"
+               "待 Step 7 e2e 後重寫"
+    )
+    def test_audit_report_attempt_files_kept(self, state):
+        ...

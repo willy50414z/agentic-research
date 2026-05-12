@@ -66,7 +66,14 @@ def plan_step(state: dict) -> dict:
     py_path = plan.get("strategy_file") or str(
         Path(strategy_dir) / f"{plan['strategy_name']}.py"
     )
-    plan["strategy_file"] = py_path  # ensure plan reflects the v0/ path
+    # Only record strategy_file when the .py was actually written to disk.
+    # If the LLM fallback was used, the file does not exist; leaving strategy_file
+    # unset causes backtest.py to look in work_dir/strategies/ rather than
+    # forwarding a phantom path that makes freqtrade exit with a cryptic error.
+    if Path(py_path).exists():
+        plan["strategy_file"] = py_path
+    else:
+        plan.pop("strategy_file", None)
     snapshot_path = ARTIFACTS_DIR / "v0_strategy_spec.md"
     try:
         if Path(py_path).exists():

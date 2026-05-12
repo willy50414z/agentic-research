@@ -42,15 +42,20 @@ items:
   - id: M1
     type: param            # param | logic
     target:
-      kind: class_attr     # class_attr | hyperopt_param | dict_value
-      name: stoploss
-      # field: default     # 僅 hyperopt_param 需要
-      # path: 'minimal_roi."0"'  # 僅 dict_value 需要
+      path: stoploss       # dotted path 進 config.json
     from: -0.05
     to: -0.03
     rationale: "OOS max_drawdown 0.31 超過 0.20 門檻"
 
   - id: M2
+    type: param
+    target:
+      path: custom_params.max_units    # 策略自訂參數放 custom_params 子 dict
+    from: 4
+    to: 2
+    rationale: "降低 pyramid 上限以收斂風險"
+
+  - id: M3
     type: logic
     target:
       function: populate_indicators
@@ -81,12 +86,15 @@ items:
 
 ## type=param 額外必填
 
-- `target.kind`：`class_attr` | `hyperopt_param` | `dict_value`
-- `target.name`：目標識別名（必填）
-- `target.field`（**僅 hyperopt_param 必填**）：`default` | `low` | `high` | `decimals`
-- `target.path`（**僅 dict_value 必填**）：點分路徑語法，例如 `minimal_roi."0"`
-- `from`：修訂前的值（型別與 .py 中一致）
+- `target.path`：點分路徑，指向 `config.json` 內的單一欄位。
+  - 例：`stoploss`, `max_open_trades`, `max_entry_position_adjustment` ← freqtrade 21 個內建可覆寫欄位
+  - 例：`custom_params.max_units`, `custom_params.pyramid_step_atr` ← 策略自訂參數（baseline 策略以 `self.config.get("custom_params", {{}}).get(...)` 讀取）
+  - 例：`minimal_roi` ← 整個 dict 替換（`to` 是新 dict 本身）
+  - 例：`entry_pricing.price_side` ← 巢狀 freqtrade 欄位
+- `from`：修訂前的值（型別與 config 中現值一致）
 - `to`：修訂後的值（型別與 from 一致）
+
+**禁止用 type=param 影響 hyperopt 搜尋空間**（low/high/categories）。本 revise 流程不調整 hyperopt 搜尋空間，僅調整 backtest 實際使用的參數值（從 config 讀）。
 
 ## type=logic 額外必填
 
@@ -121,6 +129,18 @@ items:
 
 - intent.md 中提到的每條修訂方向，至少對應一個 checklist item（可拆成多個）
 - intent.md 沒提到的東西，不可寫進 checklist（保持「契約」純度）
-- 純參數調整（stoploss、minimal_roi、hyperopt default）一定走 `type: param`，不可寫成 logic
-- 邏輯修改（新增/移除 indicator、修改 entry/exit 條件）一定走 `type: logic`
+- 純參數調整（stoploss、minimal_roi、max_entry_position_adjustment、custom_params.* 等）一定走 `type: param`，不可寫成 logic
+- 邏輯修改（新增/移除 indicator、修改 entry/exit 條件、新增自訂函式邏輯）一定走 `type: logic`
 - 不要為了「看起來工整」把 logic items 強行套上 from/to 欄位
+
+# 架構備忘（不影響你的輸出格式，但影響你的判斷）
+
+下游處理：
+- `type: param` 由 orchestrator 直接 patch 進 `config.json` 的 `target.path` 位置（不過 LLM、不動 `.py`）；
+  freqtrade 載入時對 21 個內建欄位自動 override 策略 class default；
+  策略自訂參數則由策略 `self.config.get("custom_params", {{}}).get(...)` 讀取。
+- `type: logic` 由 subagent LLM 重寫策略 `.py` 中對應的 function body。
+
+這代表：
+- `target.path` 必須真的指向 config.json 的合法路徑（或 baseline 策略已宣告會從 `custom_params` 讀取的 key）。
+- 改 `.py` 中的 class attribute 是**未授權變更**，會被 audit 抓——所以 param items 一律走 config 路徑。

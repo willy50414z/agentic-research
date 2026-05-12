@@ -32,7 +32,6 @@ from app.freqtrade.checklist import (
     ChecklistItem,
     ItemType,
     LogicTarget,
-    ParamKind,
     ParamTarget,
 )
 
@@ -72,40 +71,23 @@ def _extract_structural(py_text: str) -> _StructuralData:
 # ---------------------------------------------------------------------------
 
 
-def _ast_value_for_param_item(item: ChecklistItem, structural: _StructuralData) -> object:
-    """Look up the post-audit AST value for a ``type: param`` checklist item.
+def _config_value_for_param_item(item: ChecklistItem, config_dict: dict | None) -> object:
+    """Look up the post-patch ``config.json`` value for a ``type: param`` checklist item.
 
-    Returns the extracted value (any literal type) or :data:`_ex.UNPARSEABLE`
-    when the field could not be deterministically parsed.
+    Returns the value at ``item.target.path`` walked into ``config_dict``, or
+    :data:`_ex.UNPARSEABLE` when the path is missing / ``config_dict`` is None /
+    a segment descends into a non-dict.
     """
     if item.type != ItemType.PARAM or not isinstance(item.target, ParamTarget):
-        raise TypeError(f"_ast_value_for_param_item: item {item.id} not type=param")
-    target = item.target
-    if target.kind == ParamKind.CLASS_ATTR:
-        if target.name == "stoploss":
-            return structural.stoploss
-        if target.name == "timeframe":
-            return structural.timeframe
-        # Fallback for arbitrary class attributes: re-parse the .py is overkill,
-        # so we just signal unparseable. The orchestrator's deterministic
-        # check_param already verified equality during audit; this snapshot
-        # path is informational.
+        raise TypeError(f"_config_value_for_param_item: item {item.id} not type=param")
+    if not config_dict:
         return _ex.UNPARSEABLE
-    if target.kind == ParamKind.HYPEROPT_PARAM:
-        params = structural.hyperopt_params or {}
-        info = params.get(target.name) or {}
-        return info.get(target.field or "default", _ex.UNPARSEABLE)
-    if target.kind == ParamKind.DICT_VALUE:
-        # Only minimal_roi is used today; resolve the path within it.
-        head, *rest = (target.path or "").split(".", 1)
-        if head != "minimal_roi" or not isinstance(structural.minimal_roi, dict):
+    cur: object = config_dict
+    for part in item.target.path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
             return _ex.UNPARSEABLE
-        if not rest:
-            return structural.minimal_roi
-        # rest is e.g. '"0"' — strip surrounding quotes
-        key = rest[0].strip().strip("'\"")
-        return structural.minimal_roi.get(key, _ex.UNPARSEABLE)
-    return _ex.UNPARSEABLE
+        cur = cur[part]
+    return cur
 
 
 # ---------------------------------------------------------------------------
@@ -150,33 +132,31 @@ def _render_structural(s: _StructuralData) -> str:
     return "".join(lines)
 
 
-def _render_delta_param_item(item: ChecklistItem, structural: _StructuralData) -> str:
-    actual = _ast_value_for_param_item(item, structural)
+def _render_delta_param_item(item: ChecklistItem, config_dict: dict | None) -> str:
+    actual = _config_value_for_param_item(item, config_dict)
     expected = item.to_value
     target = item.target
-    target_desc = f"{target.kind.value}:{target.name}"  # type: ignore[union-attr]
-    if isinstance(target, ParamTarget) and target.field:
-        target_desc += f".{target.field}"
-    if isinstance(target, ParamTarget) and target.path:
-        target_desc += f" path={target.path}"
+    target_desc = f"config:{target.path}"  # type: ignore[union-attr]
 
-    # SoT cross-check: if extractor returned a parseable value and it doesn't
+    # SoT cross-check: if config_dict had a value at this path and it doesn't
     # match the checklist's `to`, raise — this is the post-audit safety net.
+    # When config_dict is None or path missing, actual == UNPARSEABLE and we
+    # render the snapshot informationally without raising.
     if actual != _ex.UNPARSEABLE and actual != expected:
         raise ValueError(
             f"strategy_spec snapshot: param item {item.id} expects {expected!r} "
-            f"but extracted AST value is {actual!r} from {target_desc}"
+            f"but config[{target.path}] is {actual!r}"  # type: ignore[union-attr]
         )
-    ast_note = (
-        f"AST 驗證: `{_format_value(actual)}` (匹配)" if actual == expected
-        else f"AST 驗證: `{_ex.UNPARSEABLE}` (extractor 無法解析)"
+    config_note = (
+        f"config 驗證: `{_format_value(actual)}` (匹配)" if actual == expected
+        else f"config 驗證: `{_ex.UNPARSEABLE}` (config 未提供或路徑不存在)"
     )
 
     lines = [
         f"### {item.id} (source: checklist.param)\n",
         f"- target: `{target_desc}`\n",
         f"- {_format_value(item.from_value)} → {_format_value(item.to_value)}\n",
-        f"- {ast_note}\n",
+        f"- {config_note}\n",
     ]
     return "".join(lines)
 
@@ -200,11 +180,11 @@ def _render_delta_logic_item(item: ChecklistItem) -> str:
     return "".join(lines)
 
 
-def _render_delta(checklist: Checklist, structural: _StructuralData) -> str:
+def _render_delta(checklist: Checklist, config_dict: dict | None) -> str:
     lines = ["## Delta vs 前輪（來源: checklist）\n\n"]
     for item in checklist.items:
         if item.type == ItemType.PARAM:
-            lines.append(_render_delta_param_item(item, structural))
+            lines.append(_render_delta_param_item(item, config_dict))
         else:
             lines.append(_render_delta_logic_item(item))
         lines.append("\n")
@@ -231,6 +211,7 @@ def write_strategy_spec_snapshot(
     checklist: Checklist | None,
     intent_md: str | None,
     output_path: Path | str,
+    config_dict: dict | None = None,
 ) -> Path:
     """Render and write ``v{N}_strategy_spec.md``.
 
@@ -245,13 +226,16 @@ def write_strategy_spec_snapshot(
         intent_md: the approved ``revision_intent.md`` text. ``None`` for
             baseline v0 (no LLM commentary section is rendered).
         output_path: destination markdown path.
+        config_dict: the post-patch ``config.json`` dict. Used to cross-check
+            param-type checklist items against their ``to_value``. ``None``
+            disables the cross-check (snapshot is informational only).
 
     Returns:
         Path to the written markdown file.
 
     Raises:
         ValueError: if a ``type: param`` checklist item disagrees with the
-            extracted AST value of the corresponding field — this signals a
+            value at the corresponding path in ``config_dict`` — this signals a
             post-audit divergence and is intentionally fatal so callers can
             surface it as a TERMINATE rather than silently uploading an
             incoherent snapshot.
@@ -270,7 +254,7 @@ def write_strategy_spec_snapshot(
     parts.append("\n")
 
     if checklist is not None:
-        parts.append(_render_delta(checklist, structural))
+        parts.append(_render_delta(checklist, config_dict))
 
     if intent_md is not None:
         parts.append(_render_intent_section(intent_md))

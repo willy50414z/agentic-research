@@ -38,8 +38,13 @@ from app.freqtrade.audit import run_audit, write_audit_report
 from app.freqtrade.checklist import (
     AuditReport,
     Checklist,
+    ChecklistItem,
+    CompletionItem,
     CompletionReport,
+    ItemType,
+    LogicTarget,
     Overall,
+    ParamTarget,
     RoutingDecision,
     ValidationError,
     cross_check,
@@ -47,7 +52,14 @@ from app.freqtrade.checklist import (
     parse_completion_report,
 )
 
-from .._common import ARTIFACTS_DIR, _call_llm as _default_call_llm, _load_prompt
+from .._common import (
+    ARTIFACTS_DIR,
+    _call_llm as _default_call_llm,
+    _call_llm_revise_llm1 as _default_call_llm1,
+    _call_llm_revise_llm2 as _default_call_llm2,
+    _call_llm_revise_audit as _default_call_llm_audit,
+    _load_prompt,
+)
 from ..strategy_snapshot import write_strategy_spec_snapshot
 
 logger = logging.getLogger(__name__)
@@ -251,8 +263,84 @@ def _stage_c_checklist(
 
 
 # ---------------------------------------------------------------------------
-# Stage D — Subagent writes new .py + completion_report
+# Stage D — Param patches (orchestrator-deterministic) + Subagent (logic only)
 # ---------------------------------------------------------------------------
+
+
+def _set_dotted_path(d: dict, path: str, value: Any) -> None:
+    """In-place dotted-path set into a (possibly nested) dict.
+
+    Intermediate dicts are created on demand. If an intermediate segment
+    points to a non-dict scalar, raises ValueError — that's a checklist bug
+    the caller should surface as a Stage D termination.
+    """
+    parts = path.split(".")
+    cur: Any = d
+    for i, part in enumerate(parts[:-1]):
+        if part not in cur:
+            cur[part] = {}
+        elif not isinstance(cur[part], dict):
+            prefix = ".".join(parts[: i + 1])
+            raise ValueError(
+                f"config path '{path}': segment '{prefix}' is not a dict; "
+                f"cannot descend (got {type(cur[part]).__name__})"
+            )
+        cur = cur[part]
+    cur[parts[-1]] = value
+
+
+def _apply_param_patches_to_config(
+    *,
+    checklist: Checklist,
+    state: dict,
+    staging_dir: Path,
+) -> tuple[dict, list[CompletionItem]]:
+    """Apply param-type checklist items to ``plan.config_overrides`` and regenerate
+    ``config.json``.
+
+    Returns ``(config_dict, completion_items_for_param)``:
+      - ``config_dict`` is the post-patch config (parsed back from disk)
+      - ``completion_items_for_param`` is a list of ``CompletionItem`` (one per
+        param checklist item, all ``completed=True, location="config.json:<path>"``)
+        for the orchestrator to merge into the final ``CompletionReport``.
+
+    The actual ``state["implementation_plan"]["config_overrides"]`` is mutated
+    in place; callers should subsequently mirror the change into whatever
+    persistent representation they use.
+    """
+    from app.freqtrade.config_generator import generate_config  # local import to avoid cycle
+
+    plan = state.setdefault("implementation_plan", {}) or {}
+    state["implementation_plan"] = plan  # ensure persisted reference
+    overrides = dict(plan.get("config_overrides") or {})
+
+    param_items = [it for it in checklist.items if it.type == ItemType.PARAM]
+    completion_items: list[CompletionItem] = []
+    for item in param_items:
+        if not isinstance(item.target, ParamTarget):
+            raise ReviseTerminate(
+                "STAGE_D_PARAM_TARGET_INVALID",
+                detail=f"item {item.id}: param target is not ParamTarget",
+            )
+        try:
+            _set_dotted_path(overrides, item.target.path, item.to_value)
+        except ValueError as e:
+            raise ReviseTerminate(
+                "STAGE_D_PARAM_PATCH_FAILED",
+                detail=f"item {item.id}: {e}",
+            )
+        completion_items.append(CompletionItem(
+            id=item.id, completed=True,
+            location=f"config.json:{item.target.path}",
+        ))
+
+    plan["config_overrides"] = overrides
+
+    spec = state.get("spec") or {}
+    # generate_config writes config.json into ``staging_dir`` and returns its path.
+    config_path = generate_config(spec, staging_dir, plan=plan)
+    config_dict = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    return config_dict, completion_items
 
 
 def _stage_d_subagent(
@@ -264,59 +352,135 @@ def _stage_d_subagent(
     iteration: int,
     attempt: int,
     prev_audit_feedback: str | None,
+    param_completion_items: list[CompletionItem],
     call_llm: Callable[..., str],
 ) -> tuple[Path, CompletionReport]:
-    """Run subagent to produce candidate.py + completion_report.
+    """Run subagent to produce ``candidate.py`` + ``completion_report`` for logic items.
+
+    In the config-driven architecture param items are applied by the orchestrator
+    via :func:`_apply_param_patches_to_config` (deterministic, no LLM). This
+    function handles only the ``type: logic`` slice of the checklist:
+
+    - If the checklist has no logic items → copy ``old_py`` to
+      ``candidate.py`` unchanged (no LLM call). The merged completion_report
+      contains only the orchestrator-filled param items.
+    - Otherwise → call the subagent with a filtered checklist YAML containing
+      only logic items. The subagent's completion_report is parsed and merged
+      with the param items into a single :class:`CompletionReport`.
 
     Writes:
-      - ``{staging_dir}/candidate.py`` (overwritten on retry; this is the
-        path Stage E reads and that ``_promote`` moves on APPROVED)
-      - ``{staging_dir}/completion_report_attempt_{attempt}.yaml`` (persistent;
-        never overwritten)
+      - ``{staging_dir}/candidate.py`` (overwritten on retry)
+      - ``{staging_dir}/completion_report_attempt_{attempt}.yaml`` (the merged
+        report; persistent, never overwritten)
     """
     plan = state.get("implementation_plan", {}) or {}
     old_py_path = plan.get("strategy_file")
-    old_py_text = Path(old_py_path).read_text(encoding="utf-8") if old_py_path and Path(old_py_path).exists() else ""
-
-    cwd = staging_dir / f"_llm_io_subagent_{attempt}"
-    cwd.mkdir(parents=True, exist_ok=True)
+    old_py_text = (
+        Path(old_py_path).read_text(encoding="utf-8")
+        if old_py_path and Path(old_py_path).exists() else ""
+    )
 
     candidate_path = staging_dir / "candidate.py"
     completion_persisted = staging_dir / f"completion_report_attempt_{attempt}.yaml"
-    # subagent writes to the LLM cwd; we copy out after.
-    completion_in_cwd = cwd / "completion_report.yaml"
 
-    prompt = _load_prompt("revise_subagent").format(
-        CHECKLIST_YAML=checklist_path.read_text(encoding="utf-8"),
-        OLD_PY=old_py_text,
-        CANDIDATE_PY_PATH=str(candidate_path),
-        COMPLETION_REPORT_PATH=str(completion_in_cwd),
-        ITERATION=iteration,
-        ATTEMPT=attempt,
+    logic_items = [it for it in checklist.items if it.type == ItemType.LOGIC]
+    logic_completion_items: list[CompletionItem] = []
+    unimplementable_items: list[str] = []
+
+    if not logic_items:
+        # Pure param checklist: candidate.py is byte-identical to baseline.py
+        if not old_py_text:
+            raise ReviseTerminate(
+                "STAGE_D_NO_BASELINE_PY",
+                detail=f"plan.strategy_file '{old_py_path}' missing or unreadable",
+            )
+        candidate_path.write_text(old_py_text, encoding="utf-8")
+    else:
+        cwd = staging_dir / f"_llm_io_subagent_{attempt}"
+        cwd.mkdir(parents=True, exist_ok=True)
+
+        # Filtered checklist YAML for the subagent — logic items only. We
+        # render minimally rather than re-serializing the full checklist;
+        # the subagent only needs the logic-item fields it will act on.
+        import yaml as _yaml
+        logic_yaml = _yaml.safe_dump(
+            {
+                "iteration": checklist.iteration,
+                "items": [
+                    {
+                        "id": it.id, "type": it.type.value,
+                        "target": {"function": it.target.function},  # type: ignore[union-attr]
+                        "rationale": it.rationale,
+                        "expected_signals": list(it.expected_signals),
+                        "forbidden_signals": list(it.forbidden_signals),
+                        "depends_on": list(it.depends_on),
+                    }
+                    for it in logic_items
+                ],
+            },
+            sort_keys=False, allow_unicode=True,
+        )
+
+        completion_in_cwd = cwd / "completion_report.yaml"
+        prompt = _load_prompt("revise_subagent").format(
+            CHECKLIST_YAML=logic_yaml,
+            OLD_PY=old_py_text,
+            CANDIDATE_PY_PATH=str(candidate_path),
+            COMPLETION_REPORT_PATH=str(completion_in_cwd),
+            ITERATION=iteration,
+            ATTEMPT=attempt,
+        )
+        if prev_audit_feedback:
+            prompt += (
+                "\n\n## 上一次 audit 失敗的原因（請更嚴謹自查）\n\n"
+                + prev_audit_feedback
+            )
+
+        call_llm(prompt, cwd=str(cwd))
+
+        if not candidate_path.exists():
+            raise ReviseTerminate(
+                "SUBAGENT_LLM_NO_OUTPUT",
+                detail=f"Stage D attempt {attempt}: subagent did not write {candidate_path}",
+            )
+        if not completion_in_cwd.exists():
+            raise ReviseTerminate(
+                "SUBAGENT_LLM_NO_OUTPUT",
+                detail=f"Stage D attempt {attempt}: subagent did not write completion_report.yaml",
+            )
+
+        logic_report = parse_completion_report(completion_in_cwd.read_text(encoding="utf-8"))
+        logic_completion_items = list(logic_report.items)
+        unimplementable_items = list(logic_report.unimplementable_items)
+
+    merged = CompletionReport(
+        iteration=iteration,
+        attempt=attempt,
+        items=param_completion_items + logic_completion_items,
+        unimplementable_items=unimplementable_items,
     )
-    if prev_audit_feedback:
-        prompt += (
-            "\n\n## 上一次 audit 失敗的原因（請更嚴謹自查）\n\n"
-            + prev_audit_feedback
-        )
 
-    call_llm(prompt, cwd=str(cwd))
-
-    if not candidate_path.exists():
-        raise ReviseTerminate(
-            "SUBAGENT_LLM_NO_OUTPUT",
-            detail=f"Stage D attempt {attempt}: subagent did not write {candidate_path}",
-        )
-    if not completion_in_cwd.exists():
-        raise ReviseTerminate(
-            "SUBAGENT_LLM_NO_OUTPUT",
-            detail=f"Stage D attempt {attempt}: subagent did not write completion_report.yaml",
-        )
-
-    completion_yaml = completion_in_cwd.read_text(encoding="utf-8")
-    completion_persisted.write_text(completion_yaml, encoding="utf-8")
-    completion_report = parse_completion_report(completion_yaml)
-    return candidate_path, completion_report
+    # Persist the merged report (orchestrator perspective). The raw subagent
+    # YAML, if any, lives under ``_llm_io_subagent_{attempt}/`` for forensics.
+    import yaml as _yaml
+    merged_yaml = _yaml.safe_dump(
+        {
+            "iteration": merged.iteration,
+            "attempt": merged.attempt,
+            "items": [
+                {
+                    "id": it.id, "completed": it.completed,
+                    "location": it.location, "blocking_reason": it.blocking_reason,
+                    "note": it.note,
+                }
+                for it in merged.items
+            ],
+            "unimplementable_items": list(merged.unimplementable_items),
+        },
+        sort_keys=False, allow_unicode=True,
+    )
+    completion_persisted.write_text(merged_yaml, encoding="utf-8")
+    return candidate_path, merged
 
 
 # ---------------------------------------------------------------------------
@@ -329,12 +493,18 @@ def _stage_e_audit(
     checklist: Checklist,
     candidate_path: Path,
     state: dict,
+    config_dict: dict,
     completion_report: CompletionReport,
     staging_dir: Path,
     attempt: int,
     call_llm: Callable[..., str],
 ) -> AuditReport:
-    """Run the audit and persist ``audit_report_attempt_{attempt}.yaml``."""
+    """Run the audit and persist ``audit_report_attempt_{attempt}.yaml``.
+
+    ``config_dict`` is the post-Stage-D ``config.json`` (built by
+    :func:`_apply_param_patches_to_config`). Deterministic param checks read
+    from this dict — no AST involved.
+    """
     plan = state.get("implementation_plan", {}) or {}
     old_py_path = plan.get("strategy_file")
     if not old_py_path:
@@ -349,6 +519,7 @@ def _stage_e_audit(
         checklist=checklist,
         new_py_path=candidate_path,
         old_py_path=Path(old_py_path),
+        config_dict=config_dict,
         completion_report=completion_report,
         output_dir=str(cwd),
         iteration=checklist.iteration,
@@ -439,7 +610,14 @@ def _write_audit_log_md(
 # ---------------------------------------------------------------------------
 
 
-def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -> dict:
+def revise_step_v2(
+    state: dict,
+    *,
+    call_llm: Callable[..., str] | None = None,
+    call_llm_llm1: Callable[..., str] | None = None,
+    call_llm_llm2: Callable[..., str] | None = None,
+    call_llm_audit: Callable[..., str] | None = None,
+) -> dict:
     """v2 revise orchestrator.
 
     Reads ``state["implementation_plan"]`` + ``state["last_reason"]`` and
@@ -451,7 +629,23 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
       (the last to be added in §4); ``last_result = "REVISED"``.
     - On TERMINATE: ``last_result = "TERMINATE"``, ``last_reason`` describes
       the failure mode; staging is preserved untouched.
+
+    Per-stage LLM overrides (for testing or independent provider config):
+    - ``call_llm_llm1``  — Stage A (intent proposer); falls back to ``call_llm``.
+    - ``call_llm_llm2``  — Stage B + C (intent auditor + checklist); falls back to ``call_llm``.
+    - ``call_llm_audit`` — Stage E LLM3 (logic auditor); falls back to ``call_llm``.
+    - ``call_llm``       — Stage D (subagent) and default fallback for the above.
     """
+    # Resolution order for each stage's LLM caller:
+    #   - explicit call_llm_<role> kwarg if provided
+    #   - else explicit call_llm kwarg if provided (test-injected mock)
+    #   - else module-level default for that role (production)
+    if call_llm_llm1 is None:
+        call_llm_llm1 = call_llm if call_llm is not None else _default_call_llm1
+    if call_llm_llm2 is None:
+        call_llm_llm2 = call_llm if call_llm is not None else _default_call_llm2
+    if call_llm_audit is None:
+        call_llm_audit = call_llm if call_llm is not None else _default_call_llm_audit
     if call_llm is None:
         call_llm = _default_call_llm
 
@@ -498,7 +692,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             intent_path = _stage_a_intent(
                 state=state, staging_dir=staging_dir,
                 attempt=attempt, prev_audit_feedback=audit_feedback,
-                call_llm=call_llm,
+                call_llm=call_llm_llm1,
             )
         except ReviseTerminate as e:
             return _terminate(e.reason, e.detail)
@@ -510,7 +704,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
         try:
             approved, feedback = _stage_b_audit_intent(
                 intent_path=intent_path, state=state,
-                staging_dir=staging_dir, attempt=attempt, call_llm=call_llm,
+                staging_dir=staging_dir, attempt=attempt, call_llm=call_llm_llm2,
             )
         except ReviseTerminate as e:
             return _terminate(e.reason, e.detail)
@@ -542,7 +736,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                 intent_path=intent_path, state=state,
                 staging_dir=staging_dir, iteration=iteration,
                 attempt=ck_attempt, prev_feedback=checklist_feedback,
-                call_llm=call_llm,
+                call_llm=call_llm_llm2,
             )
         except ValidationError as e:
             history.log(f"Stage C attempt={ck_attempt} END schema_FAIL: {e}")
@@ -562,6 +756,24 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
         subagent_feedback: str | None = None
         need_new_checklist = False
 
+        # Apply param patches once per checklist (deterministic, no LLM, no retry).
+        # The patched config_dict is reused across all subagent attempts.
+        try:
+            config_dict, param_completion_items = _apply_param_patches_to_config(
+                checklist=checklist, state=state, staging_dir=staging_dir,
+            )
+        except ReviseTerminate as e:
+            return _terminate(e.reason, e.detail)
+        except Exception as e:
+            return _terminate(
+                "STAGE_D_PARAM_PATCH_FAILED",
+                detail=f"{type(e).__name__}: {e}",
+            )
+        history.log(
+            f"Stage D ck_attempt={ck_attempt} param_patches_applied="
+            f"{len(param_completion_items)}"
+        )
+
         while counters["subagent_retry"] <= MAX_RETRIES:
             sa_attempt = counters["subagent_retry"]
             history.log(
@@ -573,6 +785,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
                     state=state, staging_dir=staging_dir,
                     iteration=iteration, attempt=sa_attempt,
                     prev_audit_feedback=subagent_feedback,
+                    param_completion_items=param_completion_items,
                     call_llm=call_llm,
                 )
             except ReviseTerminate as e:
@@ -614,9 +827,10 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             try:
                 audit_report = _stage_e_audit(
                     checklist=checklist, candidate_path=candidate_path,
-                    state=state, completion_report=completion_report,
+                    state=state, config_dict=config_dict,
+                    completion_report=completion_report,
                     staging_dir=staging_dir, attempt=sa_attempt,
-                    call_llm=call_llm,
+                    call_llm=call_llm_audit,
                 )
             except ReviseTerminate as e:
                 return _terminate(e.reason, e.detail)
@@ -724,6 +938,7 @@ def revise_step_v2(state: dict, *, call_llm: Callable[..., str] | None = None) -
             checklist=checklist,
             intent_md=intent_text,
             output_path=snapshot_path,
+            config_dict=config_dict,
         )
         artifacts.append({"type": "strategy_spec", "path": str(snapshot_path)})
     except ValueError as e:

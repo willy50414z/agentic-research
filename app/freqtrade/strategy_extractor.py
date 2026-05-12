@@ -12,12 +12,13 @@ the sentinel ``UNPARSEABLE`` ("<unparseable>") and logs a warning. Callers
 MUST NOT attempt to recover via LLM inference (per
 ``per-iteration-strategy-snapshot`` capability spec).
 
-Several private AST helpers in :mod:`app.freqtrade.audit` already implement
-the same node walks we need (``_find_strategy_class``, ``_find_class_attr``,
-``_literal_value``, ``_find_hyperopt_call``, ``_hyperopt_field_value``).
-We import them directly to avoid duplicating logic. They are private
-(underscore-prefixed) but reusing them here is intentional — both modules
-operate on the same freqtrade strategy AST shape.
+Generic AST helpers (``_find_strategy_class``, ``_find_class_attr``,
+``_literal_value``, ``_parse_module``) live in :mod:`app.freqtrade.audit` and
+are reused here. Hyperopt-parameter-specific helpers (``_find_hyperopt_call``,
+``_hyperopt_field_value``) are defined locally in this module — they were
+previously needed by ``audit.deterministic_check_param`` for AST-based param
+verification, but the config-driven audit reads param values from
+``config.json`` dict-paths and no longer needs to parse hyperopt Calls.
 """
 from __future__ import annotations
 
@@ -25,15 +26,65 @@ import ast
 import logging
 from typing import Any
 
-# Reuse private AST helpers from audit.py — see module docstring.
+# Reuse generic AST helpers from audit.py — see module docstring.
 from app.freqtrade.audit import (
     _find_class_attr,
-    _find_hyperopt_call,
     _find_strategy_class,
-    _hyperopt_field_value,
     _literal_value,
     _parse_module,
 )
+
+
+# ---------------------------------------------------------------------------
+# Hyperopt-specific AST helpers (moved here from audit.py)
+# ---------------------------------------------------------------------------
+
+
+_HYPEROPT_PARAM_CALLEES = {
+    "IntParameter", "DecimalParameter", "CategoricalParameter", "BooleanParameter",
+}
+
+
+def _find_hyperopt_call(class_node: ast.ClassDef, name: str) -> ast.Call | None:
+    """Find ``<name> = IntParameter/DecimalParameter/CategoricalParameter(...)`` in class body."""
+    assign = _find_class_attr(class_node, name)
+    if assign is None:
+        return None
+    if not isinstance(assign.value, ast.Call):
+        return None
+    callee = assign.value.func
+    callee_name: str | None = None
+    if isinstance(callee, ast.Name):
+        callee_name = callee.id
+    elif isinstance(callee, ast.Attribute):
+        callee_name = callee.attr
+    if callee_name not in _HYPEROPT_PARAM_CALLEES:
+        return None
+    return assign.value
+
+
+def _hyperopt_field_value(call: ast.Call, field_name: str) -> Any:
+    """Extract ``field_name`` argument from a hyperopt parameter Call.
+
+    ``default`` may be passed positionally (3rd positional arg in IntParameter)
+    or as a keyword. Other fields (``low``/``high``/``decimals``) are typically
+    keyword-only or in known positional slots. Returns ``UNPARSEABLE`` sentinel
+    when not extractable.
+    """
+    for kw in call.keywords:
+        if kw.arg == field_name:
+            return _literal_value(kw.value)
+
+    # positional fallback for IntParameter / DecimalParameter:
+    #   IntParameter(low, high, default=, space=, optimize=, decimals=)
+    if field_name == "low" and len(call.args) >= 1:
+        return _literal_value(call.args[0])
+    if field_name == "high" and len(call.args) >= 2:
+        return _literal_value(call.args[1])
+    if field_name == "default" and len(call.args) >= 3:
+        return _literal_value(call.args[2])
+
+    return UNPARSEABLE
 
 logger = logging.getLogger(__name__)
 

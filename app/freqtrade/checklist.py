@@ -36,18 +36,27 @@ class ItemType(str, Enum):
     LOGIC = "logic"
 
 
-class ParamKind(str, Enum):
-    CLASS_ATTR = "class_attr"
-    HYPEROPT_PARAM = "hyperopt_param"
-    DICT_VALUE = "dict_value"
-
-
 @dataclass
 class ParamTarget:
-    kind: ParamKind
-    name: str
-    field: str | None = None  # only for hyperopt_param: default | low | high | decimals
-    path: str | None = None   # only for dict_value: e.g. 'minimal_roi."0"'
+    """Targets a single key in ``config.json`` via dotted path.
+
+    Examples::
+
+        "stoploss"                       # freqtrade standard top-level field
+        "max_entry_position_adjustment"  # freqtrade standard top-level int
+        "minimal_roi"                    # standard top-level dict — to_value
+                                         # is the entire replacement dict
+        "custom_params.max_units"        # strategy-defined custom param under
+                                         # the custom_params sub-dict
+        "entry_pricing.price_side"       # nested freqtrade field
+
+    Param items never modify the strategy ``.py``; Stage D applies them by
+    patching the work_dir's ``config.json``. Freqtrade then either picks the
+    value up via its own ``_override_attribute_helper`` (for the 21 standard
+    fields) or the strategy reads ``self.config.get("custom_params", {{}}).get(...)``.
+    """
+
+    path: str
 
 
 @dataclass
@@ -112,30 +121,10 @@ def _require_type(value: Any, expected_type: type, ctx: str, field_name: str) ->
 
 
 def _parse_param_target(raw: dict, ctx: str) -> ParamTarget:
-    kind_raw = _require(raw, "kind", ctx)
-    try:
-        kind = ParamKind(kind_raw)
-    except ValueError:
-        raise ValidationError(
-            f"{ctx}: target.kind '{kind_raw}' must be one of "
-            f"{[k.value for k in ParamKind]}"
-        )
-    name = _require_type(_require(raw, "name", ctx), str, ctx, "target.name")
-
-    field_val: str | None = raw.get("field")
-    path_val: str | None = raw.get("path")
-
-    if kind == ParamKind.HYPEROPT_PARAM:
-        if not field_val:
-            raise ValidationError(f"{ctx}: target.field required when kind=hyperopt_param")
-        if field_val not in {"default", "low", "high", "decimals"}:
-            raise ValidationError(
-                f"{ctx}: target.field '{field_val}' must be default|low|high|decimals"
-            )
-    if kind == ParamKind.DICT_VALUE:
-        if not path_val:
-            raise ValidationError(f"{ctx}: target.path required when kind=dict_value")
-    return ParamTarget(kind=kind, name=name, field=field_val, path=path_val)
+    path = _require_type(_require(raw, "path", ctx), str, ctx, "target.path")
+    if not path.strip():
+        raise ValidationError(f"{ctx}.target.path: must be non-empty")
+    return ParamTarget(path=path)
 
 
 def _parse_logic_target(raw: dict, ctx: str) -> LogicTarget:

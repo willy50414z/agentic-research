@@ -1,13 +1,13 @@
 """
 tests/test_strategy_snapshot.py
 
-Coverage for ``app/freqtrade/steps/strategy_snapshot.py``:
+Coverage for ``app/freqtrade/steps/strategy_snapshot.py`` after the config-driven
+schema migration:
 
-  - 4.10 — structural values come from AST; LLM補充 section never injects values
-  - 4.11 — UNPARSEABLE-only fields propagate to the markdown rather than being
-            invented
-  - 4.13 — param item delta shows ``from → to`` and AST verification matches;
-            mismatch raises ValueError
+  - 4.10 — structural values come from AST; LLM 補充 section never injects values
+  - 4.11 — UNPARSEABLE-only fields propagate to the markdown rather than being invented
+  - 4.13 — param item delta shows ``from → to`` and the config-value cross-check
+            against the post-patch ``config_dict``; mismatch raises ValueError
   - 4.14 — logic item delta shows function + expected_signals + forbidden_signals
             + rationale; no from/to fields appear
 """
@@ -24,7 +24,6 @@ from app.freqtrade.checklist import (
     ChecklistItem,
     ItemType,
     LogicTarget,
-    ParamKind,
     ParamTarget,
 )
 from app.freqtrade.steps.strategy_snapshot import write_strategy_spec_snapshot
@@ -116,11 +115,12 @@ class TestStructuralFromAST:
         assert "修訂摘要" not in text
 
     def test_revised_iteration_includes_delta_and_llm_sections(self, tmp_path):
-        new_py = _BASE_PY.replace("stoploss = -0.05", "stoploss = -0.03")
-        py = _write_py(tmp_path, new_py)
+        # In the config-driven architecture the .py is unchanged across iterations
+        # for param-only checklist items — the new stoploss lives in config_dict.
+        py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             from_value=-0.05, to_value=-0.03,
             rationale="OOS dd 0.31 > 0.20",
         ))
@@ -129,6 +129,7 @@ class TestStructuralFromAST:
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=intent_md, output_path=out,
+            config_dict={"stoploss": -0.03},
         )
         text = out.read_text(encoding="utf-8")
         assert "結構性資料" in text
@@ -145,13 +146,14 @@ class TestStructuralFromAST:
         out = tmp_path / "v1_spec.md"
         cl = _checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             from_value=-0.05, to_value=-0.05,  # no real change for this test
             rationale="...",
         ))
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=intent_md, output_path=out,
+            config_dict={"stoploss": -0.05},
         )
         text = out.read_text(encoding="utf-8")
         # Find the structural section (everything before "Delta")
@@ -195,38 +197,38 @@ class TestUnparseable:
 
 
 # ---------------------------------------------------------------------------
-# 4.13 — param item delta + AST cross-check
+# 4.13 — param item delta + config_dict cross-check
 # ---------------------------------------------------------------------------
 
 
 class TestParamDelta:
 
-    def test_param_delta_shows_from_to_and_matches_ast(self, tmp_path):
-        new_py = _BASE_PY.replace("stoploss = -0.05", "stoploss = -0.03")
-        py = _write_py(tmp_path, new_py)
+    def test_param_delta_shows_from_to_and_matches_config(self, tmp_path):
+        py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             from_value=-0.05, to_value=-0.03, rationale="dd",
         ))
         out = tmp_path / "spec.md"
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=None, output_path=out,
+            config_dict={"stoploss": -0.03},
         )
         text = out.read_text(encoding="utf-8")
         # Delta line shows from → to
         assert "-0.05 → -0.03" in text
-        # AST verification line
-        assert "AST 驗證" in text
+        # config verification line
+        assert "config 驗證" in text
         assert "(匹配)" in text
 
     def test_param_mismatch_raises(self, tmp_path):
-        # AST has stoploss=-0.05 but checklist says we changed to -0.03 → mismatch
+        # config_dict has stoploss=-0.05 but checklist says we changed to -0.03 → mismatch
         py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             from_value=-0.05, to_value=-0.03, rationale="dd",
         ))
         out = tmp_path / "spec.md"
@@ -234,44 +236,61 @@ class TestParamDelta:
             write_strategy_spec_snapshot(
                 py_path=py, prev_py_path=None,
                 checklist=cl, intent_md=None, output_path=out,
+                config_dict={"stoploss": -0.05},
             )
 
-    def test_hyperopt_param_delta(self, tmp_path):
-        new_py = _BASE_PY.replace("default=14", "default=10")
-        py = _write_py(tmp_path, new_py)
+    def test_param_no_config_dict_renders_unparseable(self, tmp_path):
+        # config_dict=None should not raise; the cross-check is skipped and
+        # the delta line shows "<unparseable>" instead of "(匹配)".
+        py = _write_py(tmp_path, _BASE_PY)
+        cl = _checklist(ChecklistItem(
+            id="M1", type=ItemType.PARAM,
+            target=ParamTarget(path="stoploss"),
+            from_value=-0.05, to_value=-0.03, rationale="dd",
+        ))
+        out = tmp_path / "spec.md"
+        write_strategy_spec_snapshot(
+            py_path=py, prev_py_path=None,
+            checklist=cl, intent_md=None, output_path=out,
+        )
+        text = out.read_text(encoding="utf-8")
+        assert "<unparseable>" in text or "config 未提供" in text
+
+    def test_nested_custom_param_delta(self, tmp_path):
+        py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M2", type=ItemType.PARAM,
-            target=ParamTarget(
-                kind=ParamKind.HYPEROPT_PARAM, name="rsi_period", field="default",
-            ),
-            from_value=14, to_value=10, rationale="shorten lookback",
+            target=ParamTarget(path="custom_params.max_units"),
+            from_value=4, to_value=2, rationale="reduce risk",
         ))
         out = tmp_path / "spec.md"
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=None, output_path=out,
+            config_dict={"custom_params": {"max_units": 2}},
         )
         text = out.read_text(encoding="utf-8")
-        assert "14 → 10" in text
+        assert "4 → 2" in text
         assert "(匹配)" in text
+        assert "custom_params.max_units" in text
 
-    def test_dict_value_delta(self, tmp_path):
-        new_py = _BASE_PY.replace('minimal_roi = {"0": 0.10}', 'minimal_roi = {"0": 0.05}')
-        py = _write_py(tmp_path, new_py)
+    def test_dict_value_replacement_delta(self, tmp_path):
+        py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M5", type=ItemType.PARAM,
-            target=ParamTarget(
-                kind=ParamKind.DICT_VALUE, name="minimal_roi", path='minimal_roi."0"',
-            ),
-            from_value=0.10, to_value=0.05, rationale="tighter ROI",
+            target=ParamTarget(path="minimal_roi"),
+            from_value={"0": 0.10},
+            to_value={"0": 0.05},
+            rationale="tighter ROI",
         ))
         out = tmp_path / "spec.md"
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=None, output_path=out,
+            config_dict={"minimal_roi": {"0": 0.05}},
         )
         text = out.read_text(encoding="utf-8")
-        assert "0.1 → 0.05" in text or "0.10 → 0.05" in text
+        assert "(匹配)" in text
 
 
 # ---------------------------------------------------------------------------
@@ -337,14 +356,15 @@ class TestSeparation:
         py = _write_py(tmp_path, _BASE_PY)
         cl = _checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
-            from_value=-0.05, to_value=-0.05,  # match AST, so no exception
+            target=ParamTarget(path="stoploss"),
+            from_value=-0.05, to_value=-0.05,  # match config, so no exception
             rationale="...",
         ))
         out = tmp_path / "spec.md"
         write_strategy_spec_snapshot(
             py_path=py, prev_py_path=None,
             checklist=cl, intent_md=None, output_path=out,
+            config_dict={"stoploss": -0.05},
         )
         text = out.read_text(encoding="utf-8")
         structural = text.split("## Delta vs 前輪")[0]

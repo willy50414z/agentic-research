@@ -4,19 +4,19 @@ tests/test_audit.py
 Coverage for app/freqtrade/audit.py and the YAML schemas in app/freqtrade/checklist.py.
 
 Tests are unit-level and mock the LLM call. They exercise:
-  - deterministic_check_param across class_attr / hyperopt_param / dict_value
+  - deterministic_check_param against config_dict via dotted path lookup
   - deterministic_check_invariants (timeframe, class name, order_types, look-ahead)
-  - check_unauthorized_changes (positive + negative cases)
+  - check_unauthorized_changes (class attributes never authorized; method bodies
+    only when listed in logic items)
   - compute_subagent_self_report_consistent (deterministic + LLM3 + invariants)
   - LLM3 prompt input isolation (rationale / intent / last_reason absent)
   - INSUFFICIENT → CHECKLIST_AMBIGUOUS routing
-  - dishonest_attempt continuity rules (including reset on checklist change)
+  - dishonest_attempt continuity rules
 """
 from __future__ import annotations
 
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -41,12 +41,10 @@ from app.freqtrade.checklist import (
     ItemType,
     LogicTarget,
     Overall,
-    ParamKind,
     ParamTarget,
     Verdict,
     parse_audit_report,
     parse_checklist,
-    parse_completion_report,
 )
 
 
@@ -100,12 +98,6 @@ def _strategy_with(**replacements: str) -> str:
     return src
 
 
-def _write(tmp_path: Path, name: str, src: str) -> Path:
-    p = tmp_path / name
-    p.write_text(src, encoding="utf-8")
-    return p
-
-
 def _checklist_with_items(items: list[ChecklistItem]) -> Checklist:
     return Checklist(
         iteration=1,
@@ -121,89 +113,99 @@ def _checklist_with_items(items: list[ChecklistItem]) -> Checklist:
 
 
 # ---------------------------------------------------------------------------
-# 1.10 deterministic_check_param  (PASS/FAIL across kinds)
+# 1.10 deterministic_check_param  — dict-path lookup against config_dict
 # ---------------------------------------------------------------------------
 
 
 class TestDeterministicCheckParam:
 
-    def test_class_attr_pass(self, tmp_path):
-        new_py = _strategy_with(**{"stoploss = -0.05": "stoploss = -0.03"})
-        new = _write(tmp_path, "new.py", new_py)
+    def test_top_level_freqtrade_field_pass(self):
         item = ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )
-        result = deterministic_check_param(item, new)
+        result = deterministic_check_param(item, {"stoploss": -0.03})
         assert result.verdict == Verdict.PASS
         assert "stoploss" in result.evidence
 
-    def test_class_attr_fail(self, tmp_path):
-        new = _write(tmp_path, "new.py", _BASE_PY)  # stoploss still -0.05
+    def test_top_level_freqtrade_field_fail_mismatch(self):
         item = ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )
-        result = deterministic_check_param(item, new)
+        result = deterministic_check_param(item, {"stoploss": -0.05})
         assert result.verdict == Verdict.FAIL
         assert "-0.05" in result.evidence
 
-    def test_hyperopt_param_default_pass(self, tmp_path):
-        new_py = _strategy_with(
-            **{"rsi_period = IntParameter(10, 20, default=14, space=\"buy\", optimize=True)":
-               "rsi_period = IntParameter(10, 20, default=10, space=\"buy\", optimize=True)"}
-        )
-        new = _write(tmp_path, "new.py", new_py)
-        item = ChecklistItem(
-            id="M2", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.HYPEROPT_PARAM, name="rsi_period", field="default"),
-            rationale="…", from_value=14, to_value=10,
-        )
-        result = deterministic_check_param(item, new)
-        assert result.verdict == Verdict.PASS
-
-    def test_hyperopt_param_default_fail(self, tmp_path):
-        new = _write(tmp_path, "new.py", _BASE_PY)  # default=14 unchanged
-        item = ChecklistItem(
-            id="M2", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.HYPEROPT_PARAM, name="rsi_period", field="default"),
-            rationale="…", from_value=14, to_value=10,
-        )
-        result = deterministic_check_param(item, new)
-        assert result.verdict == Verdict.FAIL
-
-    def test_dict_value_pass(self, tmp_path):
-        new_py = _strategy_with(**{'minimal_roi = {"0": 0.10}': 'minimal_roi = {"0": 0.05}'})
-        new = _write(tmp_path, "new.py", new_py)
-        item = ChecklistItem(
-            id="M5", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.DICT_VALUE, name="minimal_roi", path='minimal_roi."0"'),
-            rationale="…", from_value=0.10, to_value=0.05,
-        )
-        result = deterministic_check_param(item, new)
-        assert result.verdict == Verdict.PASS
-
-    def test_dict_value_fail(self, tmp_path):
-        new = _write(tmp_path, "new.py", _BASE_PY)
-        item = ChecklistItem(
-            id="M5", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.DICT_VALUE, name="minimal_roi", path='minimal_roi."0"'),
-            rationale="…", from_value=0.10, to_value=0.05,
-        )
-        result = deterministic_check_param(item, new)
-        assert result.verdict == Verdict.FAIL
-
-    def test_class_attr_missing(self, tmp_path):
-        new = _write(tmp_path, "new.py", _BASE_PY)
+    def test_top_level_freqtrade_field_fail_missing(self):
         item = ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="nonexistent_attr"),
-            rationale="…", from_value=1, to_value=2,
+            target=ParamTarget(path="stoploss"),
+            rationale="…", from_value=-0.05, to_value=-0.03,
         )
-        result = deterministic_check_param(item, new)
+        result = deterministic_check_param(item, {})  # config has no stoploss
         assert result.verdict == Verdict.FAIL
+        assert "missing" in result.evidence
+
+    def test_nested_custom_param_pass(self):
+        item = ChecklistItem(
+            id="M2", type=ItemType.PARAM,
+            target=ParamTarget(path="custom_params.max_units"),
+            rationale="…", from_value=4, to_value=2,
+        )
+        result = deterministic_check_param(
+            item, {"custom_params": {"max_units": 2, "atr_period": 20}},
+        )
+        assert result.verdict == Verdict.PASS
+
+    def test_nested_custom_param_fail_mismatch(self):
+        item = ChecklistItem(
+            id="M2", type=ItemType.PARAM,
+            target=ParamTarget(path="custom_params.max_units"),
+            rationale="…", from_value=4, to_value=2,
+        )
+        result = deterministic_check_param(
+            item, {"custom_params": {"max_units": 4}},
+        )
+        assert result.verdict == Verdict.FAIL
+
+    def test_nested_path_missing_subkey(self):
+        item = ChecklistItem(
+            id="M2", type=ItemType.PARAM,
+            target=ParamTarget(path="custom_params.max_units"),
+            rationale="…", from_value=4, to_value=2,
+        )
+        result = deterministic_check_param(
+            item, {"custom_params": {"atr_period": 20}},  # max_units missing
+        )
+        assert result.verdict == Verdict.FAIL
+        assert "missing" in result.evidence
+
+    def test_path_descends_into_non_dict(self):
+        item = ChecklistItem(
+            id="M2", type=ItemType.PARAM,
+            target=ParamTarget(path="stoploss.foo"),
+            rationale="…", from_value=None, to_value="anything",
+        )
+        result = deterministic_check_param(item, {"stoploss": -0.05})
+        assert result.verdict == Verdict.FAIL
+        assert "non-dict" in result.evidence
+
+    def test_dict_value_replacement_pass(self):
+        # minimal_roi is set wholesale (the whole dict is to_value)
+        item = ChecklistItem(
+            id="M5", type=ItemType.PARAM,
+            target=ParamTarget(path="minimal_roi"),
+            rationale="…",
+            from_value={"0": 0.10},
+            to_value={"0": 0.05, "60": 0.02, "120": 0},
+        )
+        result = deterministic_check_param(
+            item, {"minimal_roi": {"0": 0.05, "60": 0.02, "120": 0}},
+        )
+        assert result.verdict == Verdict.PASS
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +262,12 @@ class TestInvariants:
 
 # ---------------------------------------------------------------------------
 # 1.19–1.22 check_unauthorized_changes
+#
+# In the config-driven architecture:
+#   - param items never authorize .py edits (they patch config.json)
+#   - logic items authorize ONLY the named function's body
+#   - any class attribute add/remove/modify is unauthorized
+#   - docstring change is always unauthorized
 # ---------------------------------------------------------------------------
 
 
@@ -298,11 +306,39 @@ class TestUnauthorizedChanges:
         result = check_unauthorized_changes(_BASE_PY, new_py, cl)
         assert result is None  # no unauthorized change
 
-    def test_pure_comment_change_no_trigger(self):
+    def test_class_attr_modification_is_unauthorized(self):
+        # param values must live in config.json; touching the .py class attr
+        # (even when there is a param item with the same name) is forbidden.
         cl = self._checklist(ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
-            rationale="…", from_value=-0.05, to_value=-0.05,
+            target=ParamTarget(path="stoploss"),
+            rationale="…", from_value=-0.05, to_value=-0.03,
+        ))
+        new_py = _strategy_with(**{"stoploss = -0.05": "stoploss = -0.03"})
+        result = check_unauthorized_changes(_BASE_PY, new_py, cl)
+        assert result is not None
+        assert result.id == UNAUTHORIZED_CHANGE_ID
+        assert "stoploss" in result.evidence
+        assert "config.json" in result.evidence  # error mentions correct channel
+
+    def test_class_attr_addition_is_unauthorized(self):
+        cl = self._checklist(ChecklistItem(
+            id="M3", type=ItemType.LOGIC,
+            target=LogicTarget(function="populate_indicators"),
+            rationale="…", expected_signals=["ok"],
+        ))
+        new_py = _strategy_with(**{
+            "stoploss = -0.05": "stoploss = -0.05\n    new_attr = 1",
+        })
+        result = check_unauthorized_changes(_BASE_PY, new_py, cl)
+        assert result is not None
+        assert "new_attr" in result.evidence
+
+    def test_pure_comment_change_no_trigger(self):
+        cl = self._checklist(ChecklistItem(
+            id="M3", type=ItemType.LOGIC,
+            target=LogicTarget(function="populate_indicators"),
+            rationale="…", expected_signals=["x"],
         ))
         new_py = _strategy_with(**{
             'dataframe.loc[(dataframe["rsi"] > 70), "exit_long"] = 1':
@@ -333,22 +369,20 @@ class TestUnauthorizedChanges:
 
     def test_class_docstring_modified_fails(self):
         cl = self._checklist(ChecklistItem(
-            id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
-            rationale="…", from_value=-0.05, to_value=-0.03,
+            id="M3", type=ItemType.LOGIC,
+            target=LogicTarget(function="populate_indicators"),
+            rationale="…", expected_signals=["ok"],
         ))
         new_py = _strategy_with(**{'"""class docstring"""': '"""new class docstring"""'})
-        # also change stoploss to be authorized
-        new_py = new_py.replace("stoploss = -0.05", "stoploss = -0.03")
         result = check_unauthorized_changes(_BASE_PY, new_py, cl)
         assert result is not None
         assert "docstring" in result.evidence
 
     def test_method_docstring_change_fails(self):
         cl = self._checklist(ChecklistItem(
-            id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
-            rationale="…", from_value=-0.05, to_value=-0.03,
+            id="M3", type=ItemType.LOGIC,
+            target=LogicTarget(function="populate_indicators"),  # NOT populate_exit_trend
+            rationale="…", expected_signals=["ok"],
         ))
         # add a docstring to populate_exit_trend (which is NOT in the authorized set)
         new_py = _BASE_PY.replace(
@@ -358,10 +392,29 @@ class TestUnauthorizedChanges:
             '        """new docstring"""\n'
             "        dataframe.loc[(dataframe[\"rsi\"] > 70), \"exit_long\"] = 1",
         )
-        new_py = new_py.replace("stoploss = -0.05", "stoploss = -0.03")
         result = check_unauthorized_changes(_BASE_PY, new_py, cl)
         assert result is not None
         assert "docstring" in result.evidence
+
+
+class TestDeriveAuthorizedTargets:
+
+    def test_logic_only_in_whitelist(self):
+        cl = _checklist_with_items([
+            ChecklistItem(
+                id="M1", type=ItemType.PARAM,
+                target=ParamTarget(path="stoploss"),
+                rationale="…", from_value=-0.05, to_value=-0.03,
+            ),
+            ChecklistItem(
+                id="M3", type=ItemType.LOGIC,
+                target=LogicTarget(function="populate_indicators"),
+                rationale="…", expected_signals=["ok"],
+            ),
+        ])
+        authorized = derive_authorized_targets(cl)
+        # param items contribute NOTHING to the .py whitelist
+        assert authorized.functions == {"populate_indicators"}
 
 
 # ---------------------------------------------------------------------------
@@ -381,33 +434,33 @@ class TestSelfReportConsistency:
     def test_param_fail_reported_complete_is_dishonest(self):
         cl = _checklist_with_items([ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )])
         det = [CheckResult(id="M1", verdict=Verdict.FAIL, evidence="…")]
-        report = _completion(items=[CompletionItem(id="M1", completed=True, location="x.py:1")])
+        report = _completion(items=[CompletionItem(id="M1", completed=True, location="config.json:stoploss")])
         det, _ = compute_subagent_self_report_consistent(det, [], report, cl)
         assert det[0].subagent_self_report_consistent is False  # dishonest
 
     def test_param_pass_reported_complete_is_honest(self):
         cl = _checklist_with_items([ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )])
         det = [CheckResult(id="M1", verdict=Verdict.PASS, evidence="…")]
-        report = _completion(items=[CompletionItem(id="M1", completed=True, location="x.py:1")])
+        report = _completion(items=[CompletionItem(id="M1", completed=True, location="config.json:stoploss")])
         det, _ = compute_subagent_self_report_consistent(det, [], report, cl)
         assert det[0].subagent_self_report_consistent is True
 
     def test_invariant_fail_marked_null(self):
         cl = _checklist_with_items([ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )])
         det = [CheckResult(id="timeframe_unchanged", verdict=Verdict.FAIL, evidence="…")]
-        report = _completion(items=[CompletionItem(id="M1", completed=True, location="x.py:1")])
+        report = _completion(items=[CompletionItem(id="M1", completed=True, location="config.json:stoploss")])
         det, _ = compute_subagent_self_report_consistent(det, [], report, cl)
         # invariant has no matching checklist id → None
         assert det[0].subagent_self_report_consistent is None
@@ -415,11 +468,11 @@ class TestSelfReportConsistency:
     def test_unauthorized_change_marked_null(self):
         cl = _checklist_with_items([ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )])
         det = [CheckResult(id=UNAUTHORIZED_CHANGE_ID, verdict=Verdict.FAIL, evidence="…")]
-        report = _completion(items=[CompletionItem(id="M1", completed=True, location="x.py:1")])
+        report = _completion(items=[CompletionItem(id="M1", completed=True, location="config.json:stoploss")])
         det, _ = compute_subagent_self_report_consistent(det, [], report, cl)
         assert det[0].subagent_self_report_consistent is None
 
@@ -438,7 +491,7 @@ class TestSelfReportConsistency:
         # subagent says "I didn't complete this", so failing audit is not lying
         cl = _checklist_with_items([ChecklistItem(
             id="M1", type=ItemType.PARAM,
-            target=ParamTarget(kind=ParamKind.CLASS_ATTR, name="stoploss"),
+            target=ParamTarget(path="stoploss"),
             rationale="…", from_value=-0.05, to_value=-0.03,
         )])
         det = [CheckResult(id="M1", verdict=Verdict.FAIL, evidence="…")]
@@ -541,7 +594,9 @@ class TestInsufficientRouting:
             )
             return ""
 
-        report_obj = run_audit(cl, new, old, report, str(out_dir), call_llm=_fake_call)
+        report_obj = run_audit(
+            cl, new, old, {}, report, str(out_dir), call_llm=_fake_call,
+        )
         assert report_obj.overall == Overall.REJECTED
         assert CHECKLIST_AMBIGUOUS_TAG in (report_obj.reject_summary or "")
         assert report_obj.should_route_to_stage_c() is True
@@ -549,8 +604,6 @@ class TestInsufficientRouting:
 
 # ---------------------------------------------------------------------------
 # 1.16 dishonest_attempt continuity helpers
-#    The orchestrator handles continuity, but AuditReport.has_dishonest_attempt
-#    is the per-attempt detector that the orchestrator consumes.
 # ---------------------------------------------------------------------------
 
 
@@ -641,7 +694,7 @@ class TestParseChecklist:
             "items": [
                 {
                     "id": "M1", "type": "param",
-                    "target": {"kind": "class_attr", "name": "stoploss"},
+                    "target": {"path": "stoploss"},
                     "from": -0.05, "to": -0.03,
                     "rationale": "drawdown reduction",
                 },
@@ -655,6 +708,16 @@ class TestParseChecklist:
         cl = parse_checklist(self._ok_yaml())
         assert cl.iteration == 1 and cl.locked is True
         assert cl.items[0].id == "M1"
+        assert cl.items[0].target.path == "stoploss"  # type: ignore[union-attr]
+
+    def test_valid_nested_path(self):
+        import yaml as _yaml
+        data = _yaml.safe_load(self._ok_yaml())
+        data["items"][0]["target"] = {"path": "custom_params.max_units"}
+        data["items"][0]["from"] = 4
+        data["items"][0]["to"] = 2
+        cl = parse_checklist(_yaml.safe_dump(data))
+        assert cl.items[0].target.path == "custom_params.max_units"  # type: ignore[union-attr]
 
     def test_locked_false_rejected(self):
         with pytest.raises(Exception):
@@ -668,5 +731,19 @@ class TestParseChecklist:
         import yaml as _yaml
         bad = _yaml.safe_load(self._ok_yaml())
         del bad["items"][0]["from"]
+        with pytest.raises(Exception):
+            parse_checklist(_yaml.safe_dump(bad))
+
+    def test_param_target_missing_path_rejected(self):
+        import yaml as _yaml
+        bad = _yaml.safe_load(self._ok_yaml())
+        bad["items"][0]["target"] = {}
+        with pytest.raises(Exception):
+            parse_checklist(_yaml.safe_dump(bad))
+
+    def test_param_target_empty_path_rejected(self):
+        import yaml as _yaml
+        bad = _yaml.safe_load(self._ok_yaml())
+        bad["items"][0]["target"] = {"path": "   "}
         with pytest.raises(Exception):
             parse_checklist(_yaml.safe_dump(bad))

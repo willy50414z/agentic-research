@@ -79,13 +79,13 @@ def _make_fixture_zip(strategy_name: str = "TestRsiStrategy") -> bytes:
 
 class TestConfigGenerator:
     def test_generate_config_creates_file(self, tmp_path):
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         path = generate_config(SAMPLE_SPEC, tmp_path)
         assert path.exists()
         assert path.name == "config.json"
 
     def test_generate_config_fields(self, tmp_path):
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         path = generate_config(SAMPLE_SPEC, tmp_path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
         assert cfg["exchange"]["name"] == "binance"
@@ -95,7 +95,7 @@ class TestConfigGenerator:
         assert "exit_pricing" in cfg
 
     def test_generate_config_timeframe_uppercased(self, tmp_path):
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         spec = {**SAMPLE_SPEC, "trading_scope": {**SAMPLE_SPEC["trading_scope"], "timeframe": "1D"}}
         path = generate_config(spec, tmp_path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
@@ -105,17 +105,107 @@ class TestConfigGenerator:
         assert cfg["pairlists"] == [{"method": "StaticPairList"}]
 
     def test_generate_config_missing_pair_raises(self, tmp_path):
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         bad_spec = {"trading_scope": {"timeframe": "1h", "exchange": "binance"}, "execution": {"fee": "0.10%"}}
         with pytest.raises(KeyError):
             generate_config(bad_spec, tmp_path)
 
     def test_generate_config_fee_already_float(self, tmp_path):
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         spec = {**SAMPLE_SPEC, "execution": {"fee": 0.001}}
         path = generate_config(spec, tmp_path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
         assert abs(cfg["fee"] - 0.001) < 1e-9
+
+
+class TestConfigOverrides:
+    """plan.config_overrides 是 v2 revise 階段把 strategy 參數寫進 config.json 的主要管道。
+
+    Freqtrade 對 21 個標準欄位（stoploss / minimal_roi / max_entry_position_adjustment 等）
+    內建 config-overrides-strategy-class 機制（strategy_resolver._override_attribute_helper）；
+    策略自訂參數則放在 custom_params 子 dict，策略以 self.config.get('custom_params', {}).get(...)
+    讀取。本組測試驗證 generate_config 正確把 plan.config_overrides deep-merge 進 config.json。
+    """
+
+    def test_overrides_freqtrade_standard_field(self, tmp_path):
+        """stoploss 不在 base config 中，plan.config_overrides 應能直接寫入。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {**SAMPLE_PLAN, "config_overrides": {"stoploss": -0.20}}
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["stoploss"] == -0.20
+
+    def test_overrides_existing_base_field(self, tmp_path):
+        """max_open_trades 在 base config 中已是 1，plan.config_overrides 應能覆寫。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {**SAMPLE_PLAN, "config_overrides": {"max_open_trades": 3}}
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["max_open_trades"] == 3
+
+    def test_overrides_custom_params_dict(self, tmp_path):
+        """custom_params 是策略自訂參數的命名空間；整個 dict 寫入 config.json。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {
+            **SAMPLE_PLAN,
+            "config_overrides": {
+                "custom_params": {"max_units": 2, "pyramid_step_atr": 1.0},
+            },
+        }
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["custom_params"] == {"max_units": 2, "pyramid_step_atr": 1.0}
+
+    def test_overrides_minimal_roi_dict(self, tmp_path):
+        """minimal_roi 是 dict 型 freqtrade 標準欄位；整份 dict 替換而非 merge key。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {
+            **SAMPLE_PLAN,
+            "config_overrides": {"minimal_roi": {"0": 0.1, "60": 0.05, "120": 0}},
+        }
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["minimal_roi"] == {"0": 0.1, "60": 0.05, "120": 0}
+
+    def test_overrides_deep_merge_into_nested_base(self, tmp_path):
+        """既有的巢狀 base dict（如 entry_pricing）應被 deep-merge，未指定的 key 保留。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {
+            **SAMPLE_PLAN,
+            "config_overrides": {"entry_pricing": {"price_side": "same"}},
+        }
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["entry_pricing"]["price_side"] == "same"
+        # 其他原 base 欄位不應被洗掉
+        assert cfg["entry_pricing"]["use_order_book"] is False
+        assert cfg["entry_pricing"]["order_book_top"] == 1
+
+    def test_overrides_multiple_fields_atomic(self, tmp_path):
+        """單次 generate_config 內混合 freqtrade 標準 + custom_params。"""
+        from app.freqtrade.config_generator import generate_config
+        plan = {
+            **SAMPLE_PLAN,
+            "config_overrides": {
+                "stoploss": -0.15,
+                "max_entry_position_adjustment": 1,
+                "custom_params": {"atr_period": 14},
+            },
+        }
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=plan)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert cfg["stoploss"] == -0.15
+        assert cfg["max_entry_position_adjustment"] == 1
+        assert cfg["custom_params"] == {"atr_period": 14}
+
+    def test_no_overrides_does_not_inject_strategy_keys(self, tmp_path):
+        """plan 沒給 config_overrides 時，base config 不應出現 stoploss / custom_params 等欄位。"""
+        from app.freqtrade.config_generator import generate_config
+        path = generate_config(SAMPLE_SPEC, tmp_path, plan=SAMPLE_PLAN)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
+        assert "stoploss" not in cfg
+        assert "custom_params" not in cfg
+        assert "minimal_roi" not in cfg
 
 
 # ── Task 2: freqtrade_runner ──────────────────────────────────────────────────
@@ -123,7 +213,7 @@ class TestConfigGenerator:
 class TestFreqtradeRunner:
     def test_success_returns_zip_path(self, tmp_path):
         """Mock subprocess success — returns newest .zip in results_dir."""
-        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        from app.freqtrade.runner import run_freqtrade_backtest
         results_dir = tmp_path / "backtest_results"
         results_dir.mkdir()
         zip_path = results_dir / "backtest-result-2024-01-01_00-00-00.zip"
@@ -144,7 +234,7 @@ class TestFreqtradeRunner:
         assert result == zip_path
 
     def test_cli_not_found_raises(self, tmp_path):
-        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        from app.freqtrade.runner import run_freqtrade_backtest
         results_dir = tmp_path / "backtest_results"
         results_dir.mkdir()
         with patch("subprocess.run", side_effect=FileNotFoundError):
@@ -156,7 +246,7 @@ class TestFreqtradeRunner:
                 )
 
     def test_nonzero_exit_raises_runtime_error(self, tmp_path):
-        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        from app.freqtrade.runner import run_freqtrade_backtest
         results_dir = tmp_path / "backtest_results"
         results_dir.mkdir()
         with patch("subprocess.run") as mock_run:
@@ -172,7 +262,7 @@ class TestFreqtradeRunner:
                 )
 
     def test_no_new_zip_raises_value_error(self, tmp_path):
-        from projects.quant_alpha.freqtrade_runner import run_freqtrade_backtest
+        from app.freqtrade.runner import run_freqtrade_backtest
         results_dir = tmp_path / "backtest_results"
         results_dir.mkdir()
         with patch("subprocess.run") as mock_run:
@@ -189,7 +279,7 @@ class TestFreqtradeRunner:
 
 class TestResultParser:
     def test_parse_backtest_zip_basic(self, tmp_path):
-        from projects.quant_alpha.result_parser import parse_backtest_zip
+        from app.freqtrade.result_parser import parse_backtest_zip
         zip_path = tmp_path / "backtest-result-2024.zip"
         zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
         metrics = parse_backtest_zip(zip_path, "TestRsiStrategy")
@@ -201,21 +291,21 @@ class TestResultParser:
         assert isinstance(metrics["trades"], list)
 
     def test_parse_backtest_zip_wrong_strategy(self, tmp_path):
-        from projects.quant_alpha.result_parser import parse_backtest_zip
+        from app.freqtrade.result_parser import parse_backtest_zip
         zip_path = tmp_path / "backtest-result-2024.zip"
         zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
         with pytest.raises(ValueError, match="not found"):
             parse_backtest_zip(zip_path, "WrongStrategy")
 
     def test_parse_backtest_zip_bad_zip(self, tmp_path):
-        from projects.quant_alpha.result_parser import parse_backtest_zip
+        from app.freqtrade.result_parser import parse_backtest_zip
         bad_zip = tmp_path / "bad.zip"
         bad_zip.write_bytes(b"not a zip")
         with pytest.raises(ValueError, match="Invalid zip"):
             parse_backtest_zip(bad_zip, "Any")
 
     def test_write_loop_artifacts_creates_all_files(self, tmp_path):
-        from projects.quant_alpha.result_parser import write_loop_artifacts
+        from app.freqtrade.result_parser import write_loop_artifacts
         is_m  = {"win_rate": 0.6, "profit_factor": 1.5, "max_drawdown": 0.12,
                   "profit_total_pct": 25.0, "n_trades": 45, "trades": []}
         oos_m = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
@@ -241,14 +331,14 @@ class TestResultParser:
 class TestBacktestRealMode:
     def test_run_backtest_is_oos_calls_runner_twice(self, tmp_path):
         """run_backtest_is_oos should call run_freqtrade_backtest twice (IS, OOS)."""
-        from projects.quant_alpha import backtest as bt
+        from app.freqtrade import backtest as bt
 
         fake_zip = tmp_path / "fake.zip"
         fake_zip.write_bytes(_make_fixture_zip("TestRsiStrategy"))
 
-        with patch("projects.quant_alpha.backtest.run_freqtrade_backtest",
+        with patch("app.freqtrade.backtest.run_freqtrade_backtest",
                    return_value=fake_zip) as mock_runner, \
-             patch("projects.quant_alpha.backtest.generate_config",
+             patch("app.freqtrade.backtest.generate_config",
                    return_value=tmp_path / "config.json"):
             is_m, oos_m = bt.run_backtest_is_oos(
                 spec=SAMPLE_SPEC,
@@ -265,7 +355,7 @@ class TestBacktestRealMode:
         assert oos_m["win_rate"] == pytest.approx(0.60)
 
     def test_to_freqtrade_timerange(self):
-        from projects.quant_alpha.backtest import _to_freqtrade_timerange
+        from app.freqtrade.backtest import _to_freqtrade_timerange
         period = {"start": "2023-01-01", "end": "2023-12-31"}
         assert _to_freqtrade_timerange(period) == "20230101-20231231"
 
@@ -275,7 +365,7 @@ class TestBacktestRealMode:
 class TestRealImplementNode:
     def test_real_implement_runs_is_oos(self, tmp_path, monkeypatch):
         """Real implement_node calls run_backtest_is_oos and write_loop_artifacts."""
-        import projects.quant_alpha.plugin as plugin_mod
+        import app.freqtrade.steps as plugin_mod
 
         # Override BACKTEST_MODE and ARTIFACTS_DIR at the module level for this test
         monkeypatch.setattr(plugin_mod, "BACKTEST_MODE", "real")
@@ -286,19 +376,19 @@ class TestRealImplementNode:
         fake_oos = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
                     "profit_total_pct": 20.0, "n_trades": 38, "trades": []}
 
-        with patch("projects.quant_alpha.plugin.run_backtest_is_oos",
+        state = {
+            "loop_index": 0,
+            "implementation_plan": SAMPLE_PLAN,
+            "spec": SAMPLE_SPEC,
+            "artifacts": [],
+            "needs_human_approval": False,
+        }
+
+        with patch("app.freqtrade.steps.run_backtest_is_oos",
                    return_value=(fake_is, fake_oos)) as mock_bt, \
-             patch("projects.quant_alpha.plugin.write_loop_artifacts"), \
-             patch("projects.quant_alpha.plugin._append_execution_log"):
-            plugin = plugin_mod.QuantAlphaPlugin()
-            state = {
-                "loop_index": 0,
-                "implementation_plan": SAMPLE_PLAN,
-                "spec": SAMPLE_SPEC,
-                "artifacts": [],
-                "needs_human_approval": False,
-            }
-            result = plugin.implement_node(state)
+             patch("app.freqtrade.steps.write_loop_artifacts"), \
+             patch("app.freqtrade.steps._append_execution_log"):
+            result = plugin_mod.implement_step(state)
 
         assert result["is_metrics"]["win_rate"] == pytest.approx(0.6)
         assert result["oos_metrics"]["win_rate"] == pytest.approx(0.55)
@@ -320,10 +410,10 @@ class TestFreqtradeCli:
         fake_oos = {"win_rate": 0.55, "profit_factor": 1.3, "max_drawdown": 0.14,
                     "profit_total_pct": 20.0, "n_trades": 38, "trades": []}
 
-        with patch("projects.quant_alpha.freqtrade_cli.run_backtest_is_oos",
+        with patch("app.freqtrade.cli.run_backtest_is_oos",
                    return_value=(fake_is, fake_oos)) as mock_bt, \
-             patch("projects.quant_alpha.freqtrade_cli.write_loop_artifacts"):
-            from projects.quant_alpha import freqtrade_cli
+             patch("app.freqtrade.cli.write_loop_artifacts"):
+            from app.freqtrade import cli as freqtrade_cli
             freqtrade_cli.dispatch([
                 "backtest",
                 "--spec", str(spec_path),
@@ -357,14 +447,14 @@ pytestmark_freqtrade = pytest.mark.skipif(
 class TestFreqtradeRealIntegration:
     def test_config_generator_produces_valid_json(self, tmp_path):
         """Smoke test: generated config.json passes json.loads."""
-        from projects.quant_alpha.config_generator import generate_config
+        from app.freqtrade.config_generator import generate_config
         path = generate_config(SAMPLE_SPEC, tmp_path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
         assert cfg["exchange"]["name"] == "binance"
 
     def test_result_parser_with_fixture_zip(self, tmp_path):
         """Smoke test: result_parser handles the fixture zip correctly."""
-        from projects.quant_alpha.result_parser import parse_backtest_zip
+        from app.freqtrade.result_parser import parse_backtest_zip
         zip_path = tmp_path / "fixture.zip"
         zip_path.write_bytes(_make_fixture_zip("TestRsiStrategy"))
         metrics = parse_backtest_zip(zip_path, "TestRsiStrategy")

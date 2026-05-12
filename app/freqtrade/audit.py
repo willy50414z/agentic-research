@@ -37,7 +37,6 @@ from app.freqtrade.checklist import (
     ItemType,
     LogicTarget,
     Overall,
-    ParamKind,
     ParamTarget,
     Verdict,
 )
@@ -47,11 +46,8 @@ logger = logging.getLogger(__name__)
 # Sentinel evidence string used when AST extraction fails.
 _UNPARSEABLE = "<unparseable>"
 
-_HYPEROPT_PARAM_CALLEES = {"IntParameter", "DecimalParameter", "CategoricalParameter", "BooleanParameter"}
-
-
 # ---------------------------------------------------------------------------
-# AST helpers
+# AST helpers (retained for invariants + unauthorized-change guard on .py)
 # ---------------------------------------------------------------------------
 
 
@@ -92,107 +88,44 @@ def _find_class_attr(class_node: ast.ClassDef, name: str) -> ast.Assign | None:
     return None
 
 
-def _find_hyperopt_call(class_node: ast.ClassDef, name: str) -> ast.Call | None:
-    """Find ``<name> = IntParameter/DecimalParameter/CategoricalParameter(...)`` in class body."""
-    assign = _find_class_attr(class_node, name)
-    if assign is None:
-        return None
-    if not isinstance(assign.value, ast.Call):
-        return None
-    callee = assign.value.func
-    callee_name: str | None = None
-    if isinstance(callee, ast.Name):
-        callee_name = callee.id
-    elif isinstance(callee, ast.Attribute):
-        callee_name = callee.attr
-    if callee_name not in _HYPEROPT_PARAM_CALLEES:
-        return None
-    return assign.value
-
-
-def _hyperopt_field_value(call: ast.Call, field_name: str) -> Any:
-    """Extract ``field_name`` argument from a hyperopt parameter call.
-
-    ``default`` may be passed positionally (3rd positional arg in IntParameter)
-    or as a keyword. Other fields (``low``/``high``/``decimals``) are typically
-    keyword-only or in known positional slots.
-    """
-    # keyword args first
-    for kw in call.keywords:
-        if kw.arg == field_name:
-            return _literal_value(kw.value)
-
-    # positional fallback for IntParameter / DecimalParameter:
-    #   IntParameter(low, high, default=, space=, optimize=, decimals=)
-    if field_name == "low" and len(call.args) >= 1:
-        return _literal_value(call.args[0])
-    if field_name == "high" and len(call.args) >= 2:
-        return _literal_value(call.args[1])
-    if field_name == "default" and len(call.args) >= 3:
-        return _literal_value(call.args[2])
-
-    return _UNPARSEABLE
-
-
-def _resolve_dict_path(class_node: ast.ClassDef, path: str) -> Any:
-    """Resolve a dotted path like ``minimal_roi."0"`` to a literal value.
-
-    Path syntax: first segment is a class attribute name (a dict literal),
-    subsequent segments are keys (quoted = string, bare = same as quoted).
-    """
-    # primitive lexer: split on '.' but respect quoted segments
-    parts: list[str] = []
-    buf = ""
-    in_quote: str | None = None
-    for ch in path:
-        if in_quote:
-            if ch == in_quote:
-                in_quote = None
-            else:
-                buf += ch
-            continue
-        if ch in ('"', "'"):
-            in_quote = ch
-            continue
-        if ch == ".":
-            if buf:
-                parts.append(buf)
-                buf = ""
-        else:
-            buf += ch
-    if buf:
-        parts.append(buf)
-    if not parts:
-        return _UNPARSEABLE
-
-    head, *tail = parts
-    assign = _find_class_attr(class_node, head)
-    if assign is None or not isinstance(assign.value, ast.Dict):
-        return _UNPARSEABLE
-    current_dict = assign.value
-    value: Any = _literal_value(current_dict)
-    if value is _UNPARSEABLE:
-        return _UNPARSEABLE
-    for seg in tail:
-        if not isinstance(value, dict):
-            return _UNPARSEABLE
-        if seg in value:
-            value = value[seg]
-        else:
-            return _UNPARSEABLE
-    return value
-
-
 # ---------------------------------------------------------------------------
-# 1.6 deterministic_check_param
+# 1.6 deterministic_check_param — config-dict based
 # ---------------------------------------------------------------------------
 
 
-def deterministic_check_param(item: ChecklistItem, new_py_path: str | os.PathLike) -> CheckResult:
-    """Verify a single param-type checklist item against the new .py.
+def _walk_config_path(config_dict: dict, path: str) -> tuple[bool, Any, str]:
+    """Walk a dotted path into ``config_dict``.
 
-    Returns a :class:`CheckResult` with verdict PASS or FAIL. ``subagent_self_report_consistent``
-    is left as ``None`` here; :func:`compute_subagent_self_report_consistent` populates it later.
+    Returns ``(found, value, error_msg)``. When ``found`` is False, ``value``
+    is undefined and ``error_msg`` describes which segment failed.
+    """
+    cur: Any = config_dict
+    parts = path.split(".")
+    for i, part in enumerate(parts):
+        prefix = ".".join(parts[:i + 1])
+        if not isinstance(cur, dict):
+            return False, None, (
+                f"cannot descend into non-dict at segment '{prefix}' "
+                f"(got {type(cur).__name__})"
+            )
+        if part not in cur:
+            return False, None, f"key '{part}' missing at segment '{prefix}'"
+        cur = cur[part]
+    return True, cur, ""
+
+
+def deterministic_check_param(item: ChecklistItem, config_dict: dict) -> CheckResult:
+    """Verify a single param-type checklist item against the post-patch config.json.
+
+    The new architecture writes param values into ``config.json`` (freqtrade
+    overrides the strategy class automatically for its 21 standard fields;
+    strategy-custom params live under ``custom_params`` and are read via
+    ``self.config.get``). Audit therefore reduces to a dict-path lookup
+    against ``item.to_value`` — no AST involved.
+
+    Returns a :class:`CheckResult` with verdict PASS or FAIL.
+    ``subagent_self_report_consistent`` is left as ``None`` here;
+    :func:`compute_subagent_self_report_consistent` populates it later.
     """
     if item.type != ItemType.PARAM:
         raise ValueError(f"deterministic_check_param: item {item.id} is not type=param")
@@ -200,58 +133,21 @@ def deterministic_check_param(item: ChecklistItem, new_py_path: str | os.PathLik
     if not isinstance(target, ParamTarget):
         raise ValueError(f"deterministic_check_param: item {item.id} target is not ParamTarget")
 
-    src = Path(new_py_path).read_text(encoding="utf-8")
-    module = _parse_module(src)
-    if module is None:
-        return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                           evidence=f"new .py syntax error; cannot parse {new_py_path}")
-    cls = _find_strategy_class(module)
-    if cls is None:
-        return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                           evidence="new .py has no strategy class")
-
+    found, actual, err = _walk_config_path(config_dict, target.path)
+    if not found:
+        return CheckResult(
+            id=item.id, verdict=Verdict.FAIL,
+            evidence=f"config path '{target.path}': {err}",
+        )
     expected = item.to_value
-    actual: Any
-    line: int | None = None
-
-    if target.kind == ParamKind.CLASS_ATTR:
-        assign = _find_class_attr(cls, target.name)
-        if assign is None:
-            return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                               evidence=f"class attr '{target.name}' not found")
-        actual = _literal_value(assign.value)
-        line = assign.lineno
-
-    elif target.kind == ParamKind.HYPEROPT_PARAM:
-        call = _find_hyperopt_call(cls, target.name)
-        if call is None:
-            return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                               evidence=f"hyperopt param '{target.name}' not found "
-                                        f"(expected IntParameter/DecimalParameter/CategoricalParameter call)")
-        actual = _hyperopt_field_value(call, target.field or "default")
-        line = call.lineno
-
-    elif target.kind == ParamKind.DICT_VALUE:
-        if target.path is None:
-            return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                               evidence="dict_value target.path is None")
-        actual = _resolve_dict_path(cls, target.path)
-    else:  # pragma: no cover — exhausted by enum
-        return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                           evidence=f"unknown ParamKind: {target.kind}")
-
-    if actual is _UNPARSEABLE:
-        return CheckResult(id=item.id, verdict=Verdict.FAIL,
-                           evidence=f"could not extract current value of '{target.name}' from .py "
-                                    f"(non-literal expression)")
-
-    where = f"{Path(new_py_path).name}:{line}" if line else Path(new_py_path).name
     if actual == expected:
-        return CheckResult(id=item.id, verdict=Verdict.PASS,
-                           evidence=f"{where} {target.name}={actual!r} matches checklist.to")
+        return CheckResult(
+            id=item.id, verdict=Verdict.PASS,
+            evidence=f"config[{target.path}]={actual!r} matches checklist.to",
+        )
     return CheckResult(
         id=item.id, verdict=Verdict.FAIL,
-        evidence=f"{where} {target.name}={actual!r} does not match checklist.to={expected!r}",
+        evidence=f"config[{target.path}]={actual!r} does not match checklist.to={expected!r}",
     )
 
 
@@ -414,30 +310,27 @@ def deterministic_check_invariants(
 
 @dataclass
 class AuthorizedTargets:
-    """Derived from a checklist; defines what AST regions Stage D may modify."""
+    """Derived from a checklist; defines what ``.py`` regions Stage D may modify.
 
-    class_attrs: set[str] = field(default_factory=set)
-    hyperopt_params: set[str] = field(default_factory=set)
-    dict_attrs: set[str] = field(default_factory=set)  # for dict_value: only the head attr
+    In the config-driven architecture, param items modify ``config.json`` and
+    must NOT touch the strategy ``.py``. Only logic items authorize ``.py``
+    function edits.
+    """
+
     functions: set[str] = field(default_factory=set)
 
 
 def derive_authorized_targets(checklist: Checklist) -> AuthorizedTargets:
-    """Compute the AST-level write whitelist from a checklist."""
+    """Compute the ``.py`` write whitelist from a checklist.
+
+    Only logic items grant write permission to specific function bodies.
+    Class attributes / hyperopt parameter declarations / dict literals are
+    NEVER authorized for modification — those values now live in
+    ``config.json`` (see :func:`deterministic_check_param`).
+    """
     out = AuthorizedTargets()
     for item in checklist.items:
-        if item.type == ItemType.PARAM and isinstance(item.target, ParamTarget):
-            tgt = item.target
-            if tgt.kind == ParamKind.CLASS_ATTR:
-                out.class_attrs.add(tgt.name)
-            elif tgt.kind == ParamKind.HYPEROPT_PARAM:
-                out.hyperopt_params.add(tgt.name)
-            elif tgt.kind == ParamKind.DICT_VALUE:
-                # the head attribute of the path is authorized
-                if tgt.path:
-                    head = tgt.path.split(".", 1)[0]
-                    out.dict_attrs.add(head)
-        elif item.type == ItemType.LOGIC and isinstance(item.target, LogicTarget):
+        if item.type == ItemType.LOGIC and isinstance(item.target, LogicTarget):
             out.functions.add(item.target.function)
     return out
 
@@ -533,32 +426,27 @@ def check_unauthorized_changes(
     old_attrs, old_methods, old_others = _index_class(old_cls)
     new_attrs, new_methods, new_others = _index_class(new_cls)
 
-    # 1) class attribute changes — must be in authorized whitelist
-    authorized_attr_names = (
-        authorized.class_attrs | authorized.hyperopt_params | authorized.dict_attrs
-    )
+    # 1) class attribute changes — NEVER authorized in the config-driven
+    # architecture. Any add / remove / modify of a class attribute is reported.
     all_attr_names = set(old_attrs.keys()) | set(new_attrs.keys())
     for name in all_attr_names:
         old_node = old_attrs.get(name)
         new_node = new_attrs.get(name)
         if old_node is None or new_node is None:
-            # added or removed attribute
-            if name not in authorized_attr_names:
-                return CheckResult(
-                    id=UNAUTHORIZED_CHANGE_ID, verdict=Verdict.FAIL,
-                    evidence=f"class attribute '{name}' "
-                             f"{'added' if old_node is None else 'removed'} "
-                             f"but not in checklist",
-                    subagent_self_report_consistent=None,
-                )
-            continue
+            return CheckResult(
+                id=UNAUTHORIZED_CHANGE_ID, verdict=Verdict.FAIL,
+                evidence=f"class attribute '{name}' "
+                         f"{'added' if old_node is None else 'removed'} — "
+                         f"param values must be set via config.json, not .py",
+                subagent_self_report_consistent=None,
+            )
         if _ast_signature(old_node) != _ast_signature(new_node):
-            if name not in authorized_attr_names:
-                return CheckResult(
-                    id=UNAUTHORIZED_CHANGE_ID, verdict=Verdict.FAIL,
-                    evidence=f"class attribute '{name}' modified but not in checklist",
-                    subagent_self_report_consistent=None,
-                )
+            return CheckResult(
+                id=UNAUTHORIZED_CHANGE_ID, verdict=Verdict.FAIL,
+                evidence=f"class attribute '{name}' modified — "
+                         f"param values must be set via config.json, not .py",
+                subagent_self_report_consistent=None,
+            )
 
     # 2) method changes — body must be unchanged unless function is authorized
     all_method_names = set(old_methods.keys()) | set(new_methods.keys())
@@ -811,6 +699,7 @@ def run_audit(
     checklist: Checklist,
     new_py_path: str | os.PathLike,
     old_py_path: str | os.PathLike,
+    config_dict: dict,
     completion_report: CompletionReport,
     output_dir: str,
     *,
@@ -821,12 +710,19 @@ def run_audit(
     """Top-level Stage E orchestration.
 
     Order of checks:
-      1. Deterministic invariants (timeframe, class name, order_types, look-ahead)
-      2. Deterministic param-item checks (one per ``type: param`` checklist item)
-      3. Unauthorized-change guard (against checklist whitelist)
-      4. If anything FAIL'd above, short-circuit (skip LLM3); else run LLM3 on logic items
+      1. Deterministic invariants on the ``.py`` (timeframe, class name,
+         order_types four keys, no look-ahead pattern)
+      2. Deterministic param-item checks against the post-patch ``config_dict``
+         (one per ``type: param`` checklist item — dict-path lookup vs to_value)
+      3. Unauthorized-change guard on the ``.py`` (class attributes are never
+         authorized; method bodies only if listed in logic items)
+      4. If anything FAIL'd above, short-circuit (skip LLM3); else run LLM3 on
+         logic items
       5. Compute ``subagent_self_report_consistent`` for all results
       6. Compute overall verdict + reject_summary
+
+    ``config_dict`` is the full ``config.json`` after Stage D applied the param
+    patches; pass an empty dict only when the checklist has no param items.
     """
     iteration = iteration if iteration is not None else checklist.iteration
 
@@ -836,11 +732,11 @@ def run_audit(
     # 1) invariants
     invariant_results = deterministic_check_invariants(checklist.invariants, old_py, new_py)
 
-    # 2) param items
+    # 2) param items — dict-path lookup vs item.to_value
     param_results: list[CheckResult] = []
     for item in checklist.items:
         if item.type == ItemType.PARAM:
-            param_results.append(deterministic_check_param(item, new_py_path))
+            param_results.append(deterministic_check_param(item, config_dict))
 
     # 3) unauthorized change
     unauth_results: list[CheckResult] = []

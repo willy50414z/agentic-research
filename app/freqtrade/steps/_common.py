@@ -59,6 +59,24 @@ def _call_llm(prompt: str, cwd: str | None = None) -> str:
     return run_with_fallback(get_llm_targets("freqtrade_steps"), prompt, timeout=1200, cwd=cwd)
 
 
+def _call_llm_revise_llm1(prompt: str, cwd: str | None = None) -> str:
+    """Stage A — LLM1 proposes revision intent. Falls back to freqtrade_steps."""
+    targets = get_llm_targets("revise_llm1") or get_llm_targets("freqtrade_steps")
+    return run_with_fallback(targets, prompt, timeout=1200, cwd=cwd)
+
+
+def _call_llm_revise_llm2(prompt: str, cwd: str | None = None) -> str:
+    """Stage B + C — LLM2 audits intent and generates checklist. Falls back to freqtrade_steps."""
+    targets = get_llm_targets("revise_llm2") or get_llm_targets("freqtrade_steps")
+    return run_with_fallback(targets, prompt, timeout=1200, cwd=cwd)
+
+
+def _call_llm_revise_audit(prompt: str, cwd: str | None = None) -> str:
+    """Stage E LLM3 — audits logic-type checklist items. Falls back to freqtrade_steps."""
+    targets = get_llm_targets("revise_audit") or get_llm_targets("freqtrade_steps")
+    return run_with_fallback(targets, prompt, timeout=1200, cwd=cwd)
+
+
 # ---------------------------------------------------------------------------
 # Artifact / file helpers
 # ---------------------------------------------------------------------------

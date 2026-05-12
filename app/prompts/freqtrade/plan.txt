@@ -13,6 +13,43 @@
   }}
   ```
 
+## Config-driven 撰寫慣例（v2 revise 流程依賴此慣例）
+
+後續 revise 階段會透過修改 `config.json` 來調整策略參數（不修改 `.py`）。為使此流程運作，baseline 策略必須遵循以下規則：
+
+1. **Freqtrade 內建標準欄位**（共 21 個，例：`stoploss`, `minimal_roi`, `max_open_trades`,
+   `max_entry_position_adjustment`, `position_adjustment_enable`, `order_types`,
+   `process_only_new_candles`, `timeframe`, `use_exit_signal`, `exit_profit_only`,
+   `trailing_stop` 等）：寫在 class 作為 baseline default。Freqtrade 載入時若 `config.json`
+   有同名 key，會自動覆寫 class attribute（`strategy_resolver._override_attribute_helper`）。
+   不需要也不應該寫 `self.config.get(...)` 自行讀。
+
+2. **策略自訂可調參數**（class 中**非** freqtrade 標準欄位的可調數值，例如 `atr_period`,
+   `max_units`, `pyramid_step_atr`, `lookback_window`, 自定義 RSI 閾值等）：**禁止**寫成
+   plain class attribute（`max_units = 4`），必須用 `@property` 從
+   `self.config.get("custom_params", {{}}).get("<name>", <default>)` 讀取：
+
+   ```python
+   @property
+   def max_units(self) -> int:
+       return self.config.get("custom_params", {{}}).get("max_units", 4)
+
+   @property
+   def pyramid_step_atr(self) -> float:
+       return self.config.get("custom_params", {{}}).get("pyramid_step_atr", 0.5)
+   ```
+
+   讀取時用 `self.max_units`、`self.pyramid_step_atr`（不必加 `.value`）。
+
+3. **Hyperopt 參數**（`IntParameter`, `DecimalParameter`, `CategoricalParameter`）：用於指標
+   參數的搜尋空間，仍照舊宣告與使用 `.value` 存取。本研究在 backtest mode 下使用其 default，
+   revise 階段不調整其搜尋空間。
+
+判定原則：
+- 該欄位是 freqtrade 文件列出的內建欄位 → 寫 class default
+- 該欄位是策略自訂、未來 revise 階段「可能想調整」 → 用 `@property` 從 `custom_params` 讀
+- 該欄位需要 hyperopt 搜尋 → 用 `IntParameter`/`DecimalParameter`/`CategoricalParameter`
+
 ## 研究規格
 
 {SPEC}
@@ -146,7 +183,19 @@ python -c "import sys, importlib.util; spec = importlib.util.spec_from_file_loca
   "exit_pricing":  {{"price_side": "other"}}
   ```
 - 使用 **limit order** 時可省略，系統預設值為 `"other"`（相容兩種 order type）。
-- 可覆寫任何 Freqtrade config 頂層欄位（例如 `max_open_trades`、`trading_mode` 等）。
+- 可覆寫 Freqtrade 21 個標準欄位（`stoploss`, `minimal_roi`, `max_open_trades`,
+  `max_entry_position_adjustment`, `position_adjustment_enable` 等）。當 baseline 已用
+  class default 提供合理值時，此處通常留空。
+- 若策略宣告了 config-driven 自訂參數（如上一節範例的 `max_units`, `pyramid_step_atr`），
+  **必須**在 `custom_params` 子 dict 提供 baseline 初始值，否則策略只能讀到 default、
+  revise 階段無法觀察出與 baseline 的差異：
+  ```json
+  "custom_params": {{
+    "max_units": 4,
+    "pyramid_step_atr": 0.5,
+    "atr_period": 20
+  }}
+  ```
 
 注意 `run_mode`：
 - `"backtest"` — 標準 IS/OOS 雙組回測（預設，也是此 TODO A 階段唯一支援的模式）

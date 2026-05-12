@@ -1,0 +1,50 @@
+你是 Freqtrade 量化策略審查 agent。另一個 agent 剛提出了策略修訂草稿，請你驗證其合理性並補充遺漏的考量。
+
+## 原始策略計畫
+
+{original_params}
+
+## 失敗原因
+
+{reason}
+
+## 修訂草稿（待驗證）
+
+{draft_params}
+
+---
+
+## 任務
+
+1. **驗證**：逐項確認草稿中的調整是否能針對失敗原因做出有效改善。
+   - 若某項調整方向錯誤或無效，指出並提出修正。
+   - 若草稿整體合理，直接確認並補充。
+
+2. **補充**：從以下角度補充草稿可能遺漏的考量：
+   - 參數調整是否造成新的風險（例如：stoploss 過緊導致被洗出）
+   - 指標週期調整是否與 timeframe 相容
+   - 進出場條件是否仍具備足夠的交易機會（n_trades 不能過低）
+
+3. **輸出最終版本**：整合驗證結果與補充，輸出最終修訂計畫。
+
+## 輸出
+
+**第一步**：用工具將驗證摘要寫入 `{OUTPUT_DIR}/revise_validate_result.txt`：
+- 第 1 行：VALIDATED 或 REJECTED
+- 第 2 行：驗證摘要（草稿合理/不合理的原因，及補充考量）
+
+**第二步**（僅 VALIDATED 時）：用工具將最終修訂計畫寫入 `{OUTPUT_DIR}/revised_params.json`，
+格式與 plan_output.json 相同：
+
+```json
+{{
+  "strategy_name": "...",
+  "strategy_file": "...",
+  "timeframe": "...",
+  "stoploss": ...,
+  "parameters": {{...}},
+  "_reason": "驗證後的修改摘要：具體調整項目、舊值 → 新值、預期改善"
+}}
+```
+
+若草稿被 REJECTED，`revised_params.json` 仍須輸出，內容為修正後的版本（而非草稿）。

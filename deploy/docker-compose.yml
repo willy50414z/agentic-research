@@ -131,6 +131,30 @@ services:
       - agentic-research_default
 
   # ---------------------------------------------------------------------------
+  # LLM Service — 獨立 LLM endpoint，持有所有 LLM credential
+  # API: http://localhost:8001
+  # ---------------------------------------------------------------------------
+  llm-svc:
+    image: agentic-llm-svc:latest
+    container_name: agentic-llm-svc
+    restart: unless-stopped
+    volumes:
+      # CLI credential 目錄以 read-only 掛載，token 更新後立即生效
+      - ${LOCAL_CLAUDE_CONFIG_DIR:-~/.claude}:/root/.claude:ro
+      - ${LOCAL_GEMINI_CONFIG_DIR:-~/.gemini}:/root/.gemini:ro
+      - ${LOCAL_CODEX_CONFIG_DIR:-~/.codex}:/root/.codex:ro
+      # 與主 framework 共享 workspace，確保 OpenCode cwd 路徑一致
+      - ${WORKSPACE_DIR:-../data/workspace}:/workspace
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8001:8001"
+    networks:
+      - agentic-research_default
+
+  # ---------------------------------------------------------------------------
   # LangGraph research engine
   # API: http://localhost:7001
   # ---------------------------------------------------------------------------
@@ -140,9 +164,8 @@ services:
     restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     volumes:
-      - ${LOCAL_CLAUDE_CONFIG_DIR:-~/.claude}:${CLAUDE_CONFIG_DIR:-/root/.claude}
-      - ${LOCAL_GEMINI_CONFIG_DIR:-~/.gemini}:${GEMINI_CONFIG_DIR:-/root/.gemini}
-      - ${LOCAL_CODEX_CONFIG_DIR:-~/.codex}:${CODEX_CONFIG_DIR:-/root/.codex}
+      # 與 llm-svc 共享 workspace，確保 OpenCode cwd 路徑一致
+      - ${WORKSPACE_DIR:-../data/workspace}:/workspace
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-agentic-postgres-user}:${POSTGRES_PASSWORD:-agentic-postgres-pwd}@postgres:5432/${POSTGRES_DB:-agentic-research}
       ARTIFACTS_DIR: /app/artifacts
@@ -157,11 +180,10 @@ services:
       MINIO_SECURE: "false"
       MINIO_ARTIFACTS_BUCKET: research-artifacts
       LLM_CHAIN: ${LLM_CHAIN:-claude-cli}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LOCAL_LLM_ENDPOINT: ${LOCAL_LLM_ENDPOINT:-http://host.docker.internal:11434}
       LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-llama3.2}
+      # LLM 呼叫透過 llm-svc 轉發，主 framework container 不持有任何 credential
+      LLM_SVC_URL: http://llm-svc:8001
     ports:
       - "7001:8000"
     depends_on:
@@ -169,5 +191,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      llm-svc:
+        condition: service_started
     networks:
       - agentic-research_default

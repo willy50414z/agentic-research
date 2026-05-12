@@ -17,21 +17,15 @@ def pytest_configure(config):
     )
 
 
-def _mock_psycopg():
+def _mock_optional_deps():
     """
-    Stub out psycopg (and langgraph.checkpoint.postgres) so unit tests
-    can import framework.graph without a real database driver installed.
-    Integration tests that actually invoke the graph will still need the
-    real driver — they are skipped when DATABASE_URL is unset.
+    Stub out optional dependencies so unit tests can import framework modules
+    without a full environment installed.  Integration tests that need real
+    DB connectivity are skipped when DATABASE_URL is unset.
     """
     for mod in ("psycopg", "psycopg.rows", "psycopg_pool"):
         if mod not in sys.modules:
             sys.modules[mod] = MagicMock()
-
-    if "langgraph.checkpoint.postgres" not in sys.modules:
-        pg_saver_mock = MagicMock()
-        pg_saver_mock.PostgresSaver.return_value = MagicMock()
-        sys.modules["langgraph.checkpoint.postgres"] = pg_saver_mock
 
     # httpx is used by server.py — stub if not installed
     if "httpx" not in sys.modules:
@@ -43,5 +37,4 @@ def _mock_psycopg():
             sys.modules[mod] = MagicMock()
 
 
-# Apply stubs early so framework.graph can be imported in unit tests
-_mock_psycopg()
+_mock_optional_deps()

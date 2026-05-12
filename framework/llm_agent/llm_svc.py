@@ -35,6 +35,61 @@ logger = logging.getLogger(__name__)
 
 from framework.llm_agent.llm_target import LLMTarget
 
+# ---------------------------------------------------------------------------
+# Remote LLM service (llm-svc container)
+# When LLM_SVC_URL is set, run_once() delegates to the remote service
+# instead of running a local CLI subprocess.
+# ---------------------------------------------------------------------------
+
+LLM_SVC_URL: str | None = os.getenv("LLM_SVC_URL")
+
+
+def _remote_invoke(
+    target: LLMTarget,
+    prompt: str,
+    *,
+    model: str | None = None,
+    cwd: str | None = None,
+    timeout: float | None = 1800,
+    **_kwargs,
+) -> str:
+    """
+    Delegate a run_once() call to the remote llm-svc HTTP service.
+
+    Uses httpx with timeout=None so the server-side retry loop (quota, 24 h)
+    can complete without the HTTP connection timing out.
+
+    Raises:
+        ConnectionError — cannot reach LLM_SVC_URL
+        RuntimeError   — service returned an error response
+    """
+    import httpx  # imported lazily; only needed when LLM_SVC_URL is set
+
+    payload = {
+        "target": target.value,
+        "prompt": prompt,
+        "model": model,
+        "cwd": cwd,
+        "timeout": timeout,
+    }
+
+    logger.info("_remote_invoke -> %s/invoke target=%s cwd=%s", LLM_SVC_URL, target.value, cwd)
+
+    try:
+        with httpx.Client(timeout=None) as client:
+            resp = client.post(f"{LLM_SVC_URL}/invoke", json=payload)
+            resp.raise_for_status()
+            return resp.json()["output"]
+    except httpx.ConnectError as e:
+        raise ConnectionError(
+            f"Cannot connect to LLM service at {LLM_SVC_URL}. "
+            f"Check that llm-svc is running and LLM_SVC_URL is correct. Detail: {e}"
+        ) from e
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(
+            f"LLM service returned HTTP {e.response.status_code}: {e.response.text[:500]}"
+        ) from e
+
 _OPENCODE_RUNTIME_DIR = Path("data") / "tool-runtime" / "opencode"
 _REPO_ROOT = str(Path(__file__).parent.parent.parent.resolve())
 
@@ -117,6 +172,11 @@ def run_once(
     """
     if not prompt.strip():
         raise ValueError("prompt must not be empty.")
+
+    # Remote fallthrough: if LLM_SVC_URL is configured, delegate to the
+    # llm-svc HTTP service and return immediately.
+    if LLM_SVC_URL:
+        return _remote_invoke(target, prompt, model=model, cwd=cwd, timeout=timeout)
 
     _retry_interval = quota_retry_interval if quota_retry_interval is not None else _QUOTA_RETRY_INTERVAL_SECONDS
     _max_retries    = quota_max_retries    if quota_max_retries    is not None else _QUOTA_MAX_RETRIES
